@@ -1,0 +1,1902 @@
+Description: >
+    Creates a complete ECS Fargate Architecture, Stackname is the Project Name
+Parameters:
+    MinCapacity:
+        Type: Number
+        Description: Minimum number of services that can be hosted
+        Default: 1
+    MaxCapacity:
+        Type: Number
+        Description: Maximum number of services that can be hosted
+        Default: 10
+    Memory: 
+        Type: Number
+        Description: RAM Allocated for each Service. (256 Cpu can cater 512 RAM.)
+        Default: 1024
+    Cpu:
+        Type: Number
+        Description: CPU Allocated for each Service. (256 Cpu can cater 512 RAM.)
+        Default: 512
+    DesiredCount:
+        Type: Number
+        Default: 0
+        Description: Desired Number of Tasks running per service.
+    HostedZoneName:
+        Type: String
+        Default: globedv.com.
+    ApprovalARN:
+        Type: String
+        Default: arn:aws:sns:ap-southeast-1:518132289279:CICD-Lambda-MA
+    DeployToDevMsg:
+        Type: String
+        Default: "The DEVELOPMENT SOURCE CODE has been updated, do you want to Deploy to the DEVELOPMENT Environment?"
+    DeployToCanaryMsg:
+        Type: String
+        Default: "The MASTER CODE has been updated, do you want to push it to CANARY?"
+    DeployToStagingMsg:
+        Type: String
+        Default: "Canary is Ready. Kindly do a FUNCTIONAL TESTING then APPROVE or REJECT its journey to the STAGING Environment."
+    DeployToProdMsg:
+        Type: String
+        Default: "Staging is Ready. Kindly do a PERFORMANCE TESTING then APPROVE or REJECT its journey to the PRODUCTION Environment."
+    ProjectSubDomain: 
+        Description: Just the subdomain string. (project) in project.globedv.com
+        Type: String
+        Default: "fargate"
+    Domain: 
+        Description: Domain of your containers. CREATE THIS MANUALLY THEN POINT IT TO THE ALB DNS.
+        Type: String
+        Default: "globedv.com"
+    Contact: 
+        Description: Who created this stack?
+        Type: String
+        Default: "infra@globedv.com"
+    VpcCIDR:
+        Description: Please enter the IP range (CIDR notation) for this VPC
+        Type: String
+        Default: 10.192.0.0/16
+    CidrIp: 
+        Type: String 
+        Default: "0.0.0.0/0"
+        Description: "This Environment is exposed to this IP. (0.0.0.0/0) is ANYWHERE."
+    PublicSubnet1CIDR:
+        Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+        Type: String
+        Default: 10.192.10.0/24
+    ClusterName: 
+        Description: Clustername. alpha-numeric and hyphens only.
+        Type: String
+        Default: ecs-cluster-name
+    LogGroupName: 
+        Description: Log Group Name [\.\-_/#A-Za-z0-9]+ only.
+        Type: String
+        Default: ecs-log-group
+    PublicSubnet2CIDR:
+        Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+        Type: String
+        Default: 10.192.11.0/24
+    PrivateSubnet1CIDR:
+        Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+        Type: String
+        Default: 10.192.20.0/24
+    PrivateSubnet2CIDR:
+        Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+        Type: String
+        Default: 10.192.21.0/24
+    CertificateArn:
+        Description: SSL Certificate to be used. (Default *.globedv.com)
+        Type: String
+Resources:
+    Cluster:
+        Type: AWS::ECS::Cluster
+        Properties:
+            ClusterName: !Ref ClusterName
+    TaskExecutionRole:
+        Type: AWS::IAM::Role
+        Properties:
+            Path: /
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                    - Action: sts:AssumeRole
+                      Effect: Allow
+                      Principal:
+                            Service: ecs-tasks.amazonaws.com
+            ManagedPolicyArns:
+                - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+    LogGroup:
+        Type: AWS::Logs::LogGroup
+        Properties:
+            LogGroupName: !Ref LogGroupName
+    ArtifactBucket:
+        Type: AWS::S3::Bucket
+        DeletionPolicy: Retain
+        Properties:
+            Tags: 
+                - Key: Project
+                  Value: !Ref ClusterName
+                - Key: Environment
+                  Value: "Build"
+                - Key: Contact
+                  Value: !Ref Contact  
+    VPC:
+        Description: "usage !GetAtt VPC.Outputs.VPC"
+        Type: AWS::CloudFormation::Stack
+        Properties:
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-vpc-alb-secgroup.yml"
+            Parameters:
+                EnvironmentName:    !Ref AWS::StackName
+                VpcCIDR:            !Ref 'VpcCIDR'
+                PublicSubnet1CIDR:  !Ref 'PublicSubnet1CIDR'
+                PublicSubnet2CIDR:  !Ref 'PublicSubnet2CIDR'
+                PrivateSubnet1CIDR: !Ref 'PrivateSubnet1CIDR'
+                PrivateSubnet2CIDR: !Ref 'PrivateSubnet2CIDR'
+                Contact: !Ref 'Contact'
+                CidrIp: !Ref 'CidrIp'
+                HostedZoneName: !Ref HostedZoneName
+                ProjectSubDomain: !Ref ProjectSubDomain
+                CertificateArn: !Ref CertificateArn
+
+    PagesService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["pages-service","development"]]
+                FamilyCanary: !Join ["-",["pages-service","canary"]]
+                FamilyStaging: !Join ["-",["pages-service","staging"]]
+                FamilyProduction: !Join ["-",["pages-service","production"]]
+                SubDomain: "pages-service"
+                DevSNSName: "pages-service-Dev"
+                QASNSName: "pages-service-QA"
+                PMSNSName: "pages-service-PM"
+                InfraSNSName: "pages-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: pages-service
+                PolicyName: pages-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 2
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+
+    RewardsService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["rewards-service","development"]]
+                FamilyCanary: !Join ["-",["rewards-service","canary"]]
+                FamilyStaging: !Join ["-",["rewards-service","staging"]]
+                FamilyProduction: !Join ["-",["rewards-service","production"]]
+                SubDomain: "rewards-service"
+                DevSNSName: "rewards-service-Dev"
+                QASNSName: "rewards-service-QA"
+                PMSNSName: "rewards-service-PM"
+                InfraSNSName: "rewards-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: rewards-service
+                PolicyName: rewards-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 3
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+
+    AdminAuthService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["admin-auth-service","development"]]
+                FamilyCanary: !Join ["-",["admin-auth-service","canary"]]
+                FamilyStaging: !Join ["-",["admin-auth-service","staging"]]
+                FamilyProduction: !Join ["-",["admin-auth-service","production"]]
+                SubDomain: "admin-auth-service"
+                DevSNSName: "admin-auth-service-Dev"
+                QASNSName: "admin-auth-service-QA"
+                PMSNSName: "admin-auth-service-PM"
+                InfraSNSName: "admin-auth-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: admin-auth-service
+                PolicyName: admin-auth-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 4
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: 4
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 4096
+                Cpu: 2048
+
+    TransactionsService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["transactions-service","development"]]
+                FamilyCanary: !Join ["-",["transactions-service","canary"]]
+                FamilyStaging: !Join ["-",["transactions-service","staging"]]
+                FamilyProduction: !Join ["-",["transactions-service","production"]]
+                SubDomain: "transactions-service"
+                DevSNSName: "transactions-service-Dev"
+                QASNSName: "transactions-service-QA"
+                PMSNSName: "transactions-service-PM"
+                InfraSNSName: "transactions-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: transactions-service
+                PolicyName: transactions-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 5
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: 4
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 4096
+                Cpu: 2048
+
+    PointsService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["points-service","development"]]
+                FamilyCanary: !Join ["-",["points-service","canary"]]
+                FamilyStaging: !Join ["-",["points-service","staging"]]
+                FamilyProduction: !Join ["-",["points-service","production"]]
+                SubDomain: "points-service"
+                DevSNSName: "points-service-Dev"
+                QASNSName: "points-service-QA"
+                PMSNSName: "points-service-PM"
+                InfraSNSName: "points-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: points-service
+                PolicyName: points-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 6
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 4096
+                Cpu: 2048
+
+    OrganizationService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["organization-service","development"]]
+                FamilyCanary: !Join ["-",["organization-service","canary"]]
+                FamilyStaging: !Join ["-",["organization-service","staging"]]
+                FamilyProduction: !Join ["-",["organization-service","production"]]
+                SubDomain: "organization-service"
+                DevSNSName: "organization-service-Dev"
+                QASNSName: "organization-service-QA"
+                PMSNSName: "organization-service-PM"
+                InfraSNSName: "organization-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: organization-service
+                PolicyName: organization-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 7
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+
+    DesignService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["design-service","development"]]
+                FamilyCanary: !Join ["-",["design-service","canary"]]
+                FamilyStaging: !Join ["-",["design-service","staging"]]
+                FamilyProduction: !Join ["-",["design-service","production"]]
+                SubDomain: "design-service"
+                DevSNSName: "design-service-Dev"
+                QASNSName: "design-service-QA"
+                PMSNSName: "design-service-PM"
+                InfraSNSName: "design-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: design-service
+                PolicyName: design-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 8
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+
+    MerchantAuthService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["merchant-auth-service","development"]]
+                FamilyCanary: !Join ["-",["merchant-auth-service","canary"]]
+                FamilyStaging: !Join ["-",["merchant-auth-service","staging"]]
+                FamilyProduction: !Join ["-",["merchant-auth-service","production"]]
+                SubDomain: "merchant-auth-service"
+                DevSNSName: "merchant-auth-service-Dev"
+                QASNSName: "merchant-auth-service-QA"
+                PMSNSName: "merchant-auth-service-PM"
+                InfraSNSName: "merchant-auth-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: merchant-auth-service
+                PolicyName: merchant-auth-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 9
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: 4
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 4096
+                Cpu: 2048
+
+    CustomerService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["customer-service","development"]]
+                FamilyCanary: !Join ["-",["customer-service","canary"]]
+                FamilyStaging: !Join ["-",["customer-service","staging"]]
+                FamilyProduction: !Join ["-",["customer-service","production"]]
+                SubDomain: "customer-service"
+                DevSNSName: "customer-service-Dev"
+                QASNSName: "customer-service-QA"
+                PMSNSName: "customer-service-PM"
+                InfraSNSName: "customer-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: customer-service
+                PolicyName: customer-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 10
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: 4
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 4096
+                Cpu: 2048
+
+    MerchantService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["merchant-service","development"]]
+                FamilyCanary: !Join ["-",["merchant-service","canary"]]
+                FamilyStaging: !Join ["-",["merchant-service","staging"]]
+                FamilyProduction: !Join ["-",["merchant-service","production"]]
+                SubDomain: "merchant-service"
+                DevSNSName: "merchant-service-Dev"
+                QASNSName: "merchant-service-QA"
+                PMSNSName: "merchant-service-PM"
+                InfraSNSName: "merchant-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: merchant-service
+                PolicyName: merchant-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 11
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: 4
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 4096
+                Cpu: 2048
+
+    NewsService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["news-service","development"]]
+                FamilyCanary: !Join ["-",["news-service","canary"]]
+                FamilyStaging: !Join ["-",["news-service","staging"]]
+                FamilyProduction: !Join ["-",["news-service","production"]]
+                SubDomain: "news-service"
+                DevSNSName: "news-service-Dev"
+                QASNSName: "news-service-QA"
+                PMSNSName: "news-service-PM"
+                InfraSNSName: "news-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: news-service
+                PolicyName: news-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 12
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+
+    VersionService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["version-service","development"]]
+                FamilyCanary: !Join ["-",["version-service","canary"]]
+                FamilyStaging: !Join ["-",["version-service","staging"]]
+                FamilyProduction: !Join ["-",["version-service","production"]]
+                SubDomain: "version-service"
+                DevSNSName: "version-service-Dev"
+                QASNSName: "version-service-QA"
+                PMSNSName: "version-service-PM"
+                InfraSNSName: "version-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: version-service
+                PolicyName: version-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 13
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+
+    EventsService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["events-service","development"]]
+                FamilyCanary: !Join ["-",["events-service","canary"]]
+                FamilyStaging: !Join ["-",["events-service","staging"]]
+                FamilyProduction: !Join ["-",["events-service","production"]]
+                SubDomain: "events-service"
+                DevSNSName: "events-service-Dev"
+                QASNSName: "events-service-QA"
+                PMSNSName: "events-service-PM"
+                InfraSNSName: "events-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: events-service
+                PolicyName: events-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 14
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+
+    EmployeeAuthService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["employee-auth-service","development"]]
+                FamilyCanary: !Join ["-",["employee-auth-service","canary"]]
+                FamilyStaging: !Join ["-",["employee-auth-service","staging"]]
+                FamilyProduction: !Join ["-",["employee-auth-service","production"]]
+                SubDomain: "employee-auth-service"
+                DevSNSName: "employee-auth-service-Dev"
+                QASNSName: "employee-auth-service-QA"
+                PMSNSName: "employee-auth-service-PM"
+                InfraSNSName: "employee-auth-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: employee-auth-service
+                PolicyName: employee-auth-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 15
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 4096
+                Cpu: 2048
+
+    AchievementService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["achievement-service","development"]]
+                FamilyCanary: !Join ["-",["achievement-service","canary"]]
+                FamilyStaging: !Join ["-",["achievement-service","staging"]]
+                FamilyProduction: !Join ["-",["achievement-service","production"]]
+                SubDomain: "achievement-service"
+                DevSNSName: "achievement-service-Dev"
+                QASNSName: "achievement-service-QA"
+                PMSNSName: "achievement-service-PM"
+                InfraSNSName: "achievement-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: achievement-service
+                PolicyName: achievement-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 16
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+    EngagementService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            # TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-scheduled-container.yaml"
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["engagement-service","development"]]
+                FamilyCanary: !Join ["-",["engagement-service","canary"]]
+                FamilyStaging: !Join ["-",["engagement-service","staging"]]
+                FamilyProduction: !Join ["-",["engagement-service","production"]]
+                SubDomain: "engagement-service"
+                DevSNSName: "engagement-service-Dev"
+                QASNSName: "engagement-service-QA"
+                PMSNSName: "engagement-service-PM"
+                InfraSNSName: "engagement-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: engagement-service
+                PolicyName: engagement-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 17
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 4096
+                Cpu: 2048
+                # CronExpression: cron(* * * * ? *)
+                # CronState: ENABLED
+                # ScheduledTaskCount: 1
+                # ContainerRole: scheduler
+    FeedbackService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService,EngagementService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["feedback-service","development"]]
+                FamilyCanary: !Join ["-",["feedback-service","canary"]]
+                FamilyStaging: !Join ["-",["feedback-service","staging"]]
+                FamilyProduction: !Join ["-",["feedback-service","production"]]
+                SubDomain: "feedback-service"
+                DevSNSName: "feedback-service-Dev"
+                QASNSName: "feedback-service-QA"
+                PMSNSName: "feedback-service-PM"
+                InfraSNSName: "feedback-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: feedback-service
+                PolicyName: feedback-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 18
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+    MailService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService,EngagementService,FeedbackService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            # TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-scheduled-container.yaml"
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["mail-service","development"]]
+                FamilyCanary: !Join ["-",["mail-service","canary"]]
+                FamilyStaging: !Join ["-",["mail-service","staging"]]
+                FamilyProduction: !Join ["-",["mail-service","production"]]
+                SubDomain: "mail-service"
+                DevSNSName: "mail-service-Dev"
+                QASNSName: "mail-service-QA"
+                PMSNSName: "mail-service-PM"
+                InfraSNSName: "mail-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: mail-service
+                PolicyName: mail-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 19
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+                # CronExpression: cron(* * * * ? *)
+                # CronState: ENABLED
+                # ScheduledTaskCount: 1
+                # ContainerRole: queue
+    SmsService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        ##DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService,EngagementService,FeedbackService,MailService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            # TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-scheduled-container.yaml"
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["sms-service","development"]]
+                FamilyCanary: !Join ["-",["sms-service","canary"]]
+                FamilyStaging: !Join ["-",["sms-service","staging"]]
+                FamilyProduction: !Join ["-",["sms-service","production"]]
+                SubDomain: "sms-service"
+                DevSNSName: "sms-service-Dev"
+                QASNSName: "sms-service-QA"
+                PMSNSName: "sms-service-PM"
+                InfraSNSName: "sms-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: sms-service
+                PolicyName: sms-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 20
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+                # CronExpression: cron(* * * * ? *)
+                # CronState: ENABLED
+                # ScheduledTaskCount: 1
+                # ContainerRole: queue
+    TargetSegmentService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService,EngagementService,FeedbackService,MailService,SmsService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["target-segment-service","development"]]
+                FamilyCanary: !Join ["-",["target-segment-service","canary"]]
+                FamilyStaging: !Join ["-",["target-segment-service","staging"]]
+                FamilyProduction: !Join ["-",["target-segment-service","production"]]
+                SubDomain: "target-segment-service"
+                DevSNSName: "target-segment-service-Dev"
+                QASNSName: "target-segment-service-QA"
+                PMSNSName: "target-segment-service-PM"
+                InfraSNSName: "target-segment-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: target-segment-service
+                PolicyName: target-segment-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 21
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+    NotificationSegmentService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService,EngagementService,FeedbackService,MailService,SmsService,TargetSegmentService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            # TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-scheduled-container.yaml"
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["notification-service","development"]]
+                FamilyCanary: !Join ["-",["notification-service","canary"]]
+                FamilyStaging: !Join ["-",["notification-service","staging"]]
+                FamilyProduction: !Join ["-",["notification-service","production"]]
+                SubDomain: "notification-service"
+                DevSNSName: "notification-service-Dev"
+                QASNSName: "notification-service-QA"
+                PMSNSName: "notification-service-PM"
+                InfraSNSName: "notification-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: notification-service
+                PolicyName: notification-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ###DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 22
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+                # CronExpression: cron(* * * * ? *)
+                # CronState: ENABLED
+                # ScheduledTaskCount: 1
+                # ContainerRole: queue
+    BillingService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [NotificationSegmentService,VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService,EngagementService,FeedbackService,MailService,SmsService,TargetSegmentService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["billing-service","development"]]
+                FamilyCanary: !Join ["-",["billing-service","canary"]]
+                FamilyStaging: !Join ["-",["billing-service","staging"]]
+                FamilyProduction: !Join ["-",["billing-service","production"]]
+                SubDomain: "billing-service"
+                DevSNSName: "billing-service-Dev"
+                QASNSName: "billing-service-QA"
+                PMSNSName: "billing-service-PM"
+                InfraSNSName: "billing-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: billing-service
+                PolicyName: billing-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ###DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: 0
+                Priority: 23
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+    # RushService112818: 
+    #     Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+    #     # #DependsOn: [NotificationSegmentService,VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService,EngagementService,FeedbackService,MailService,SmsService,TargetSegmentService]  
+    #     Type: AWS::CloudFormation::Stack 
+    #     Properties: 
+    #         TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+    #         Parameters: 
+    #             Cluster: !Ref Cluster
+    #             ProjectSubDomain: !Ref ProjectSubDomain
+    #             HostedZoneName: !Ref HostedZoneName
+    #             ClusterArn: !GetAtt Cluster.Arn
+    #             LogGroup: !Ref LogGroup
+    #             FamilyDevelopment: !Join ["-",["rush-service-112818","development"]]
+    #             FamilyCanary: !Join ["-",["rush-service-112818","canary"]]
+    #             FamilyStaging: !Join ["-",["rush-service-112818","staging"]]
+    #             FamilyProduction: !Join ["-",["rush-service-112818","production"]]
+    #             SubDomain: "rush-service"
+    #             DevSNSName: "rush-service-Dev-112818"
+    #             QASNSName: "rush-service-QA-112818"
+    #             PMSNSName: "rush-service-PM-112818"
+    #             InfraSNSName: "rush-service-Infra-112818"
+    #             Domain: !Ref Domain
+    #             ContainerName: rush-service-112818
+    #             PolicyName: rush-service-112818
+    #             CertificateArn: !Ref CertificateArn
+    #             VpcId: !GetAtt VPC.Outputs.VPC
+    #             #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+    #             LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+    #             ###DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+    #             DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+    #             #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+    #             CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+    #             #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+    #             StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+    #             ArtifactBucketName: !Ref ArtifactBucket
+    #             PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+    #             PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+    #             PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+    #             PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+    #             TaskExecutionRole: !Ref TaskExecutionRole
+    #             DNSName: !GetAtt VPC.Outputs.DNSName
+    #             SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+    #             DesiredCount: !Ref DesiredCount
+    #             Priority: 24
+    #             DeployToCanaryMsg: !Ref DeployToCanaryMsg
+    #             DeployToProdMsg: !Ref DeployToProdMsg
+    #             DeployToDevMsg: !Ref DeployToDevMsg
+    #             DeployToStagingMsg: !Ref DeployToStagingMsg
+    #             MinCapacity: 5
+    #             MaxCapacity: 10
+    #             Memory: !Ref Memory
+    #             Cpu: !Ref Cpu
+
+    RushService012919: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [NotificationSegmentService,VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService,EngagementService,FeedbackService,MailService,SmsService,TargetSegmentService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["rush-service-012919","development"]]
+                FamilyCanary: !Join ["-",["rush-service-012919","canary"]]
+                FamilyStaging: !Join ["-",["rush-service-012919","staging"]]
+                FamilyProduction: !Join ["-",["rush-service-012919","production"]]
+                SubDomain: "rush-service"
+                DevSNSName: "rush-service-Dev-012919"
+                QASNSName: "rush-service-QA-012919"
+                PMSNSName: "rush-service-PM-012919"
+                InfraSNSName: "rush-service-Infra-012919"
+                Domain: !Ref Domain
+                ContainerName: rush-service-012919
+                PolicyName: rush-service-012919
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 27
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: 5
+                MaxCapacity: 10
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+
+    BookingService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["booking-service","development"]]
+                FamilyCanary: !Join ["-",["booking-service","canary"]]
+                FamilyStaging: !Join ["-",["booking-service","staging"]]
+                FamilyProduction: !Join ["-",["booking-service","production"]]
+                SubDomain: "booking-service"
+                DevSNSName: "booking-service-Dev"
+                QASNSName: "booking-service-QA"
+                PMSNSName: "booking-service-PM"
+                InfraSNSName: "booking-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: booking-service
+                PolicyName: booking-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 25
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: 2048
+                Cpu: 1024
+    
+
+    CustomerServiceFPM: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        #DependsOn: [NotificationSegmentService,VPC,ArtifactBucket,Cluster,TaskExecutionRole,PagesService,RewardsService,AdminAuthService,TransactionsService,PointsService,OrganizationService,DesignService,MerchantAuthService,CustomerService,MerchantService,NewsService,VersionService,EventsService,EmployeeAuthService,AchievementService,EngagementService,FeedbackService,MailService,SmsService,TargetSegmentService]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["customer-service-fpm","development"]]
+                FamilyCanary: !Join ["-",["customer-service-fpm","canary"]]
+                FamilyStaging: !Join ["-",["customer-service-fpm","staging"]]
+                FamilyProduction: !Join ["-",["customer-service-fpm","production"]]
+                SubDomain: "customer-service-fpme"
+                DevSNSName: "customer-service-fpm-Dev-012919"
+                QASNSName: "customer-service-fpme-QA-012919"
+                PMSNSName: "customer-service-fpm-PM-012919"
+                InfraSNSName: "customer-service-fpm-Infra-012919"
+                Domain: !Ref Domain
+                ContainerName: customer-service-fpm
+                PolicyName: customer-service-fpm
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 28
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: 5
+                MaxCapacity: 10
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+
+
+    EstoreService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["estore-service","development"]]
+                FamilyCanary: !Join ["-",["estore-service","canary"]]
+                FamilyStaging: !Join ["-",["estore-service","staging"]]
+                FamilyProduction: !Join ["-",["estore-service","production"]]
+                SubDomain: "estore-service"
+                DevSNSName: "estore-service-Dev"
+                QASNSName: "estore-service-QA"
+                PMSNSName: "estore-service-PM"
+                InfraSNSName: "estore-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: estore-service
+                PolicyName: estore-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 29
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+    ReportsService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        DependsOn: [EstoreService]
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["reports-service","development"]]
+                FamilyCanary: !Join ["-",["reports-service","canary"]]
+                FamilyStaging: !Join ["-",["reports-service","staging"]]
+                FamilyProduction: !Join ["-",["reports-service","production"]]
+                SubDomain: "reports-service"
+                DevSNSName: "reports-service-Dev"
+                QASNSName: "reports-service-QA"
+                PMSNSName: "reports-service-PM"
+                InfraSNSName: "reports-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: reports-service
+                PolicyName: reports-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 30
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+    PaymentsService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        DependsOn: [EstoreService,ReportsService]
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["payments-service","development"]]
+                FamilyCanary: !Join ["-",["payments-service","canary"]]
+                FamilyStaging: !Join ["-",["payments-service","staging"]]
+                FamilyProduction: !Join ["-",["payments-service","production"]]
+                SubDomain: "payments-service"
+                DevSNSName: "payments-service-Dev"
+                QASNSName: "payments-service-QA"
+                PMSNSName: "payments-service-PM"
+                InfraSNSName: "payments-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: payments-service
+                PolicyName: payments-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 31
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+    SurveyService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        DependsOn: [EstoreService,ReportsService]
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["survey-service","development"]]
+                FamilyCanary: !Join ["-",["survey-service","canary"]]
+                FamilyStaging: !Join ["-",["survey-service","staging"]]
+                FamilyProduction: !Join ["-",["survey-service","production"]]
+                SubDomain: "survey-service"
+                DevSNSName: "survey-service-Dev"
+                QASNSName: "survey-service-QA"
+                PMSNSName: "survey-service-PM"
+                InfraSNSName: "survey-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: survey-service
+                PolicyName: survey-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 32
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+    ShowcardService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        DependsOn: [EstoreService,ReportsService]
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["showcard-service","development"]]
+                FamilyCanary: !Join ["-",["showcard-service","canary"]]
+                FamilyStaging: !Join ["-",["showcard-service","staging"]]
+                FamilyProduction: !Join ["-",["showcard-service","production"]]
+                SubDomain: "showcard-service"
+                DevSNSName: "showcard-service-Dev"
+                QASNSName: "showcard-service-QA"
+                PMSNSName: "showcard-service-PM"
+                InfraSNSName: "showcard-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: showcard-service
+                PolicyName: showcard-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 33
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+    VoucherService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        DependsOn: [EstoreService,ReportsService]
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["voucher-service","development"]]
+                FamilyCanary: !Join ["-",["voucher-service","canary"]]
+                FamilyStaging: !Join ["-",["voucher-service","staging"]]
+                FamilyProduction: !Join ["-",["voucher-service","production"]]
+                SubDomain: "voucher-service"
+                DevSNSName: "voucher-service-Dev"
+                QASNSName: "voucher-service-QA"
+                PMSNSName: "voucher-service-PM"
+                InfraSNSName: "voucher-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: voucher-service
+                PolicyName: voucher-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 34
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+    PurchasePackageService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        DependsOn: [EstoreService,ReportsService]
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/RUSH-REVAMP/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["purchase-package-service","development"]]
+                FamilyCanary: !Join ["-",["purchase-package-service","canary"]]
+                FamilyStaging: !Join ["-",["purchase-package-service","staging"]]
+                FamilyProduction: !Join ["-",["purchase-package-service","production"]]
+                SubDomain: "purchase-package-service"
+                DevSNSName: "purchase-package-service-Dev"
+                QASNSName: "purchase-package-service-QA"
+                PMSNSName: "purchase-package-service-PM"
+                InfraSNSName: "purchase-package-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: purchase-package-service
+                PolicyName: purchase-package-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                #LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                ##DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                #CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                #StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 35
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+
+Outputs:
+    VpcId:
+        Value: !Ref VPC
+    ClusterName:
+        Value: !Ref Cluster
+    ServiceUrl:
+        Description: URL of the load balancer for the sample service.
+        Value: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS

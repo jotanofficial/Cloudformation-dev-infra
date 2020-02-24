@@ -1,0 +1,452 @@
+Description: >
+    Create ALB
+Parameters:
+    HostedZoneName:
+        Description: Hosted Zone sa Route 53
+        Type: String
+    ProjectSubDomain:
+        Type: String
+    EnvironmentName:
+        Description: An environment / project name that will be prefixed to resource names
+        Type: String
+    Contact:
+        Description: Contact
+        Type: String
+        Default: "infra@globedv.com"
+    CidrIp:
+        Description: CidrIp 0.0.0.0/0
+        Type: String
+        Default: "0.0.0.0/0"
+    PublicSubnet1:
+        Type: String
+        Default: subnet-320d277b
+    PublicSubnet2:
+        Type: String
+        Default: subnet-a28fb5c5
+    PrivateSubnet1:
+        Type: String
+        Default: subnet-cd002a84
+    PrivateSubnet2:
+        Type: String
+        Default: subnet-cb86bcac
+    CertificateArn:
+        Description: SSL Certificate to be used. (Default *.globedv.com)
+        Type: String
+    VpcId: 
+        Type: String
+        Description: GRewards-Prod-24
+        Default: vpc-f3185094
+Resources:
+    SecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: "http/s"
+            SecurityGroupIngress:
+                - CidrIp: !Ref CidrIp
+                  IpProtocol: "TCP"
+                  FromPort: 80
+                  ToPort: 80
+                - CidrIp: !Ref CidrIp
+                  IpProtocol: "TCP"
+                  FromPort: 443
+                  ToPort: 443
+            VpcId: !Ref VpcId
+
+    LoadBalancer:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        DependsOn: [SecurityGroup]
+        Properties:
+            Subnets:
+                - !Ref PublicSubnet1
+                - !Ref PublicSubnet2
+            SecurityGroups:
+                - !Ref SecurityGroup
+            Tags: 
+                - Key: Project
+                  Value: !Ref EnvironmentName
+                - Key: Environment
+                  Value: "Cluster"
+                - Key: Contact
+                  Value: !Ref Contact
+    DevLoadBalancer:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        DependsOn: [SecurityGroup]
+        Properties:
+            Subnets:
+                - !Ref PublicSubnet1
+                - !Ref PublicSubnet2
+            SecurityGroups:
+                - !Ref SecurityGroup
+            Tags: 
+                - Key: Project
+                  Value: !Ref EnvironmentName
+                - Key: Environment
+                  Value: "Cluster"
+                - Key: Contact
+                  Value: !Ref Contact
+    CanaryLoadBalancer:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        DependsOn: [SecurityGroup]
+        Properties:
+            Subnets:
+                - !Ref PublicSubnet1
+                - !Ref PublicSubnet2
+            SecurityGroups:
+                - !Ref SecurityGroup
+            Tags: 
+                - Key: Project
+                  Value: !Ref EnvironmentName
+                - Key: Environment
+                  Value: "Cluster"
+                - Key: Contact
+                  Value: !Ref Contact
+    StagingLoadBalancer:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        DependsOn: [SecurityGroup]
+        Properties:
+            Subnets:
+                - !Ref PublicSubnet1
+                - !Ref PublicSubnet2
+            SecurityGroups:
+                - !Ref SecurityGroup
+            Tags: 
+                - Key: Project
+                  Value: !Ref EnvironmentName
+                - Key: Environment
+                  Value: "Cluster"
+                - Key: Contact
+                  Value: !Ref Contact
+
+    TargetGroupDevelopment:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        DependsOn: [DevLoadBalancer]
+        Properties:
+            VpcId: !Ref VpcId
+            Port: 80
+            Protocol: HTTP
+            Matcher:
+                HttpCode: 200-299
+            HealthCheckIntervalSeconds: 5
+            HealthCheckPath: /
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 4
+            HealthyThresholdCount: 2
+            TargetType: "ip" 
+            TargetGroupAttributes:
+                - Key: deregistration_delay.timeout_seconds
+                  Value: 30
+    TargetGroupCanary:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        DependsOn: [CanaryLoadBalancer]
+        Properties:
+            VpcId: !Ref VpcId
+            Port: 80
+            Protocol: HTTP
+            Matcher:
+                HttpCode: 200-299
+            HealthCheckIntervalSeconds: 5
+            HealthCheckPath: /
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 4
+            HealthyThresholdCount: 2
+            TargetType: "ip" 
+            TargetGroupAttributes:
+                - Key: deregistration_delay.timeout_seconds
+                  Value: 30
+    TargetGroupStaging:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        DependsOn: [StagingLoadBalancer]
+        Properties:
+            VpcId: !Ref VpcId
+            Port: 80
+            Protocol: HTTP
+            Matcher:
+                HttpCode: 200-299
+            HealthCheckIntervalSeconds: 5
+            HealthCheckPath: /
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 4
+            HealthyThresholdCount: 2
+            TargetType: "ip" 
+            TargetGroupAttributes:
+                - Key: deregistration_delay.timeout_seconds
+                  Value: 30
+    TargetGroupProduction:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        DependsOn: [LoadBalancer]
+        Properties:
+            VpcId: !Ref VpcId
+            Port: 80
+            Protocol: HTTP
+            Matcher:
+                HttpCode: 200-299
+            HealthCheckIntervalSeconds: 5
+            HealthCheckPath: /
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 4
+            HealthyThresholdCount: 2
+            TargetType: "ip" 
+            TargetGroupAttributes:
+                - Key: deregistration_delay.timeout_seconds
+                  Value: 30
+    LoadBalancerListenerHTTP:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        DependsOn: [DevLoadBalancer,CanaryLoadBalancer,StagingLoadBalancer,LoadBalancer]
+        Properties:
+            LoadBalancerArn: !Ref LoadBalancer
+            Port: 80
+            Protocol: HTTP
+            DefaultActions:
+                - Type: forward
+                  TargetGroupArn: !Ref TargetGroupProduction
+    LoadBalancerListenerHTTPS:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        DependsOn: [DevLoadBalancer,CanaryLoadBalancer,StagingLoadBalancer,LoadBalancer]
+        Properties:
+            LoadBalancerArn: !Ref LoadBalancer
+            Port: 443
+            Protocol: HTTPS
+            Certificates:
+                - CertificateArn: !Ref CertificateArn
+            DefaultActions:
+                - Type: forward
+                  TargetGroupArn: !Ref TargetGroupProduction
+
+    DevLoadBalancerListenerHTTP:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        DependsOn: [DevLoadBalancer,CanaryLoadBalancer,StagingLoadBalancer,LoadBalancer]
+        Properties:
+            LoadBalancerArn: !Ref DevLoadBalancer
+            Port: 80
+            Protocol: HTTP
+            DefaultActions:
+                - Type: forward
+                  TargetGroupArn: !Ref TargetGroupDevelopment
+    DevLoadBalancerListenerHTTPS:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        DependsOn: [DevLoadBalancer,CanaryLoadBalancer,StagingLoadBalancer,LoadBalancer]
+        Properties:
+            LoadBalancerArn: !Ref DevLoadBalancer
+            Port: 443
+            Protocol: HTTPS
+            Certificates:
+                - CertificateArn: !Ref CertificateArn
+            DefaultActions:
+                - Type: forward
+                  TargetGroupArn: !Ref TargetGroupDevelopment
+
+    CanaryLoadBalancerListenerHTTP:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        DependsOn: [DevLoadBalancer,CanaryLoadBalancer,StagingLoadBalancer,LoadBalancer]
+        Properties:
+            LoadBalancerArn: !Ref CanaryLoadBalancer
+            Port: 80
+            Protocol: HTTP
+            DefaultActions:
+                - Type: forward
+                  TargetGroupArn: !Ref TargetGroupCanary
+    CanaryLoadBalancerListenerHTTPS:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        DependsOn: [DevLoadBalancer,CanaryLoadBalancer,StagingLoadBalancer,LoadBalancer]
+        Properties:
+            LoadBalancerArn: !Ref CanaryLoadBalancer
+            Port: 443
+            Protocol: HTTPS
+            Certificates:
+                - CertificateArn: !Ref CertificateArn
+            DefaultActions:
+                - Type: forward
+                  TargetGroupArn: !Ref TargetGroupCanary
+                  
+    StagingLoadBalancerListenerHTTP:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        DependsOn: [DevLoadBalancer,CanaryLoadBalancer,StagingLoadBalancer,LoadBalancer]
+        Properties:
+            LoadBalancerArn: !Ref StagingLoadBalancer
+            Port: 80
+            Protocol: HTTP
+            DefaultActions:
+                - Type: forward
+                  TargetGroupArn: !Ref TargetGroupStaging
+    StagingLoadBalancerListenerHTTPS:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        DependsOn: [DevLoadBalancer,CanaryLoadBalancer,StagingLoadBalancer,LoadBalancer]
+        Properties:
+            LoadBalancerArn: !Ref StagingLoadBalancer
+            Port: 443
+            Protocol: HTTPS
+            Certificates:
+                - CertificateArn: !Ref CertificateArn
+            DefaultActions:
+                - Type: forward
+                  TargetGroupArn: !Ref TargetGroupStaging
+    DNSRecord:
+        Type: AWS::Route53::RecordSetGroup
+        DependsOn: [LoadBalancer]
+        DeletionPolicy : Delete
+        Properties:
+            HostedZoneName: !Ref HostedZoneName
+            Comment: Zone apex alias targeted to ALB LoadBalancer.
+            RecordSets:
+                - Name: !Join ['.',[!Ref ProjectSubDomain,!Ref HostedZoneName]]
+                  Type: A
+                  AliasTarget: 
+                        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+                        DNSName: !GetAtt LoadBalancer.DNSName
+    DNSRecord2:
+        Type: AWS::Route53::RecordSetGroup
+        DependsOn: [LoadBalancer]
+        DeletionPolicy : Delete
+        Properties:
+            HostedZoneName: !Ref HostedZoneName
+            Comment: Zone apex alias targeted to ALB LoadBalancer.
+            RecordSets:
+                - Name: !Join ['.',['*',!Ref ProjectSubDomain,!Ref HostedZoneName]]
+                  Type: A
+                  AliasTarget: 
+                        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+                        DNSName: !GetAtt LoadBalancer.DNSName
+    DevDNSRecord:
+        Type: AWS::Route53::RecordSetGroup
+        DependsOn: [DevLoadBalancer]
+        DeletionPolicy : Delete
+        Properties:
+            HostedZoneName: !Ref HostedZoneName
+            Comment: Zone apex alias targeted to ALB LoadBalancer.
+            RecordSets:
+                - Name: !Join ['.',['dev',!Ref ProjectSubDomain,!Ref HostedZoneName]]
+                  Type: A
+                  AliasTarget: 
+                        HostedZoneId: !GetAtt DevLoadBalancer.CanonicalHostedZoneID
+                        DNSName: !GetAtt DevLoadBalancer.DNSName
+    DevDNSRecord2:
+        Type: AWS::Route53::RecordSetGroup
+        DependsOn: [DevLoadBalancer]
+        DeletionPolicy : Delete
+        Properties:
+            HostedZoneName: !Ref HostedZoneName
+            Comment: Zone apex alias targeted to ALB LoadBalancer.
+            RecordSets:
+                - Name: !Join ['.',['*','dev',!Ref ProjectSubDomain,!Ref HostedZoneName]]
+                  Type: A
+                  AliasTarget: 
+                        HostedZoneId: !GetAtt DevLoadBalancer.CanonicalHostedZoneID
+                        DNSName: !GetAtt DevLoadBalancer.DNSName
+    CanaryDNSRecord:
+        Type: AWS::Route53::RecordSetGroup
+        DependsOn: [CanaryLoadBalancer]
+        DeletionPolicy : Delete
+        Properties:
+            HostedZoneName: !Ref HostedZoneName
+            Comment: Zone apex alias targeted to ALB LoadBalancer.
+            RecordSets:
+                - Name: !Join ['.',['canary',!Ref ProjectSubDomain,!Ref HostedZoneName]]
+                  Type: A
+                  AliasTarget: 
+                        HostedZoneId: !GetAtt CanaryLoadBalancer.CanonicalHostedZoneID
+                        DNSName: !GetAtt CanaryLoadBalancer.DNSName
+    CanaryDNSRecord2:
+        Type: AWS::Route53::RecordSetGroup
+        DependsOn: [CanaryLoadBalancer]
+        DeletionPolicy : Delete
+        Properties:
+            HostedZoneName: !Ref HostedZoneName
+            Comment: Zone apex alias targeted to ALB LoadBalancer.
+            RecordSets:
+                - Name: !Join ['.',['*','canary',!Ref ProjectSubDomain,!Ref HostedZoneName]]
+                  Type: A
+                  AliasTarget: 
+                        HostedZoneId: !GetAtt CanaryLoadBalancer.CanonicalHostedZoneID
+                        DNSName: !GetAtt CanaryLoadBalancer.DNSName
+    StagingDNSRecord:
+        Type: AWS::Route53::RecordSetGroup
+        DependsOn: [StagingLoadBalancer]
+        DeletionPolicy : Delete
+        Properties:
+            HostedZoneName: !Ref HostedZoneName
+            Comment: Zone apex alias targeted to ALB LoadBalancer.
+            RecordSets:
+                - Name: !Join ['.',['staging',!Ref ProjectSubDomain,!Ref HostedZoneName]]
+                  Type: A
+                  AliasTarget: 
+                        HostedZoneId: !GetAtt StagingLoadBalancer.CanonicalHostedZoneID
+                        DNSName: !GetAtt StagingLoadBalancer.DNSName
+    StagingDNSRecord2:
+        Type: AWS::Route53::RecordSetGroup
+        DependsOn: [StagingLoadBalancer]
+        DeletionPolicy : Delete
+        Properties:
+            HostedZoneName: !Ref HostedZoneName
+            Comment: Zone apex alias targeted to ALB LoadBalancer.
+            RecordSets:
+                - Name: !Join ['.',['*','staging',!Ref ProjectSubDomain,!Ref HostedZoneName]]
+                  Type: A
+                  AliasTarget: 
+                        HostedZoneId: !GetAtt StagingLoadBalancer.CanonicalHostedZoneID
+                        DNSName: !GetAtt StagingLoadBalancer.DNSName
+Outputs:
+    VPC:
+        Description: A reference to the created VPC
+        Value: !Ref VpcId
+    PublicSubnets:
+        Description: A list of the public subnets
+        Value: !Join [ ",", [ !Ref PublicSubnet1, !Ref PublicSubnet2 ]]
+    PrivateSubnets:
+        Description: A list of the private subnets
+        Value: !Join [ ",", [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ]]
+    PublicSubnet1:
+        Description: A reference to the public subnet in the 1st Availability Zone
+        Value: !Ref PublicSubnet1
+    PublicSubnet2:
+        Description: A reference to the public subnet in the 2nd Availability Zone
+        Value: !Ref PublicSubnet2
+    PrivateSubnet1:
+        Description: A reference to the private subnet in the 1st Availability Zone
+        Value: !Ref PrivateSubnet1
+    PrivateSubnet2:
+        Description: A reference to the private subnet in the 2nd Availability Zone
+        Value: !Ref PrivateSubnet2
+    SecurityGroup:
+        Value: !Ref SecurityGroup
+    LoadBalancer:
+        Value: !Ref LoadBalancer
+    DevLoadBalancer:
+        Value: !Ref DevLoadBalancer
+    CanaryLoadBalancer:
+        Value: !Ref CanaryLoadBalancer
+    StagingLoadBalancer:
+        Value: !Ref StagingLoadBalancer
+    DNSName:
+        Value: !GetAtt LoadBalancer.DNSName
+    LoadBalancerListenerHTTP: 
+        Value: !Ref LoadBalancerListenerHTTP
+    LoadBalancerListenerHTTPS: 
+        Value: !Ref LoadBalancerListenerHTTPS
+    DevLoadBalancerListenerHTTP: 
+        Value: !Ref DevLoadBalancerListenerHTTP
+    DevLoadBalancerListenerHTTPS: 
+        Value: !Ref DevLoadBalancerListenerHTTPS
+    CanaryLoadBalancerListenerHTTP: 
+        Value: !Ref CanaryLoadBalancerListenerHTTP
+    CanaryLoadBalancerListenerHTTPS: 
+        Value: !Ref CanaryLoadBalancerListenerHTTPS
+    StagingLoadBalancerListenerHTTP: 
+        Value: !Ref StagingLoadBalancerListenerHTTP
+    StagingLoadBalancerListenerHTTPS: 
+        Value: !Ref StagingLoadBalancerListenerHTTPS
+    DNSRecord:
+        Value: !Ref DNSRecord
+    DevDNSRecord:
+        Value: !Ref DevDNSRecord
+    CanaryDNSRecord:
+        Value: !Ref CanaryDNSRecord
+    StagingDNSRecord:
+        Value: !Ref StagingDNSRecord
+    TargetGroupDevelopment:
+        Value: !Ref TargetGroupDevelopment
+    TargetGroupCanary:
+        Value: !Ref TargetGroupCanary
+    TargetGroupStaging:
+        Value: !Ref TargetGroupStaging
+    TargetGroupProduction:
+        Value: !Ref TargetGroupProduction

@@ -1,0 +1,2484 @@
+Description: >
+    This Creates a Container Service and Attaches it to a Pipeline, CodeBuild, ALB, Repo.
+    Then Declares a task Definition.
+Parameters:
+    MinCapacity:
+        Type: Number
+    MaxCapacity:
+        Type: Number
+    Memory: 
+        Type: Number
+    Cpu:
+        Type: Number
+    ApprovalARN:
+        Type: String
+        Default: arn:aws:sns:ap-southeast-1:518132289279:CICD-Lambda-MA
+    DeployToDevMsg:
+        Type: String
+    DeployToCanaryMsg:
+        Type: String
+    DeployToStagingMsg:
+        Type: String
+    DeployToProdMsg:
+        Type: String
+    DesiredCount:
+        Type: Number
+    FamilyDevelopment:
+        Type: String
+    FamilyCanary:
+        Type: String
+    FamilyStaging:
+        Type: String
+    FamilyProduction:
+        Type: String
+    ContainerName:
+        Type: String
+    DNSName:
+        Type: String
+    CertificateArn:
+        Type: String
+    VpcId:
+        Type: String
+    # LoadBalancerListenerHTTP: 
+    #     Type: String
+    LoadBalancerListenerHTTPS: 
+        Type: String
+    # DevLoadBalancerListenerHTTP: 
+    #     Type: String
+    DevLoadBalancerListenerHTTPS: 
+        Type: String
+    # CanaryLoadBalancerListenerHTTP: 
+    #     Type: String
+    CanaryLoadBalancerListenerHTTPS: 
+        Type: String
+    # StagingLoadBalancerListenerHTTP: 
+    #     Type: String
+    StagingLoadBalancerListenerHTTPS: 
+        Type: String
+    Cluster: 
+        Type: String
+    LogGroup: 
+        Type: String
+    ArtifactBucketName: 
+        Type: String
+    SecurityGroup:
+        Type: String
+    PublicSubnet1:
+        Type: String
+    PublicSubnet2:
+        Type: String
+    PrivateSubnet1:
+        Type: String
+    PrivateSubnet2:
+        Type: String
+    TaskExecutionRole:
+        Type: String
+    PolicyName:
+        Type: String
+    ClusterArn:
+        Type: String
+    SubDomain:
+        Type: String
+    Domain:
+        Type: String
+    Priority:
+        Type: Number
+    ProjectSubDomain:
+        Type: String
+    HostedZoneName:
+        Type: String
+    DevSNSName:
+        Type: String
+    QASNSName:
+        Type: String
+    PMSNSName:
+        Type: String
+    InfraSNSName:
+        Type: String
+    ContainerRole:
+        Type: String
+        Default: Main
+Resources:
+    
+    DevQueue: 
+        Type: AWS::SQS::Queue
+        Properties: 
+            QueueName: !Sub ${ContainerName}-dev-queue
+            Tags:
+                - Key: Name
+                  Value: !Sub  ${ContainerName}-dev-queue
+                - Key: Project
+                  Value: !Sub  ${ContainerName}
+                - Key: Environment
+                  Value: Development
+                - Key: Contact
+                  Value: infra@globedv.com
+            RedrivePolicy: 
+                deadLetterTargetArn: 
+                    Fn::GetAtt: 
+                        - "DevDeadLetterQueue"
+                        - "Arn"
+                maxReceiveCount: 5
+    DevDeadLetterQueue: 
+        Type: AWS::SQS::Queue
+        Properties: 
+            QueueName: !Sub ${ContainerName}-dev-dead-queue
+            Tags:
+                - Key: Name
+                  Value: !Sub ${ContainerName}-dev-dead-queue
+                - Key: Project
+                  Value: !Sub  ${ContainerName}
+                - Key: Environment
+                  Value: Development
+                - Key: Contact
+                  Value: infra@globedv.com
+    CanaryQueue: 
+        Type: AWS::SQS::Queue
+        Properties: 
+            QueueName: !Sub ${ContainerName}-canary-queue
+            Tags:
+                - Key: Name
+                  Value: !Sub  ${ContainerName}-canary-queue
+                - Key: Project
+                  Value: !Sub  ${ContainerName}
+                - Key: Environment
+                  Value: Canary
+                - Key: Contact
+                  Value: infra@globedv.com
+            RedrivePolicy: 
+                deadLetterTargetArn: 
+                    Fn::GetAtt: 
+                        - "CanaryDeadLetterQueue"
+                        - "Arn"
+                maxReceiveCount: 5
+    CanaryDeadLetterQueue: 
+        Type: AWS::SQS::Queue
+        Properties: 
+            QueueName: !Sub ${ContainerName}-canary-dead-queue
+            Tags:
+                - Key: Name
+                  Value: !Sub ${ContainerName}-canary-dead-queue
+                - Key: Project
+                  Value: !Sub  ${ContainerName}
+                - Key: Environment
+                  Value: Canary
+                - Key: Contact
+                  Value: infra@globedv.com
+    StagingQueue: 
+        Type: AWS::SQS::Queue
+        Properties: 
+            QueueName: !Sub ${ContainerName}-staging-queue
+            Tags:
+                - Key: Name
+                  Value: !Sub  ${ContainerName}-staging-queue
+                - Key: Project
+                  Value: !Sub  ${ContainerName}
+                - Key: Environment
+                  Value: Staging
+                - Key: Contact
+                  Value: infra@globedv.com
+            RedrivePolicy: 
+                deadLetterTargetArn: 
+                    Fn::GetAtt: 
+                        - "StagingDeadLetterQueue"
+                        - "Arn"
+                maxReceiveCount: 5
+    StagingDeadLetterQueue: 
+        Type: AWS::SQS::Queue
+        Properties: 
+            QueueName: !Sub ${ContainerName}-staging-dead-queue
+            Tags:
+                - Key: Name
+                  Value: !Sub ${ContainerName}-staging-dead-queue
+                - Key: Project
+                  Value: !Sub  ${ContainerName}
+                - Key: Environment
+                  Value: Staging
+                - Key: Contact
+                  Value: infra@globedv.com
+    ProductionQueue: 
+        Type: AWS::SQS::Queue
+        Properties: 
+            QueueName: !Sub ${ContainerName}-production-queue
+            Tags:
+                - Key: Name
+                  Value: !Sub  ${ContainerName}-production-queue
+                - Key: Project
+                  Value: !Sub  ${ContainerName}
+                - Key: Environment
+                  Value: Production
+                - Key: Contact
+                  Value: infra@globedv.com
+            RedrivePolicy: 
+                deadLetterTargetArn: 
+                    Fn::GetAtt: 
+                        - "StagingDeadLetterQueue"
+                        - "Arn"
+                maxReceiveCount: 5
+    ProductionDeadLetterQueue: 
+        Type: AWS::SQS::Queue
+        Properties: 
+            QueueName: !Sub ${ContainerName}-production-dead-queue
+            Tags:
+                - Key: Name
+                  Value: !Sub ${ContainerName}-production-dead-queue
+                - Key: Project
+                  Value: !Sub  ${ContainerName}
+                - Key: Environment
+                  Value: Production
+                - Key: Contact
+                  Value: infra@globedv.com
+    DevSNSArn:
+        Type: AWS::SNS::Topic
+        Properties: 
+            DisplayName: !Ref DevSNSName
+            TopicName: !Ref DevSNSName
+    QASNSArn:
+        Type: AWS::SNS::Topic
+        Properties: 
+            DisplayName: !Ref QASNSName
+            TopicName: !Ref QASNSName
+    PMSNSArn:
+        Type: AWS::SNS::Topic
+        Properties: 
+        
+            DisplayName: !Ref PMSNSName
+            TopicName: !Ref PMSNSName
+    InfraSNSArn:
+        Type: AWS::SNS::Topic
+        Properties: 
+            DisplayName: !Ref InfraSNSName
+            TopicName: !Ref InfraSNSName
+            
+    # ListenerRuleHTTP:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref LoadBalancerListenerHTTP
+    #         Priority: !Ref Priority
+    #         Conditions:
+    #             - Field: host-header
+    #               Values:
+    #                 - !Sub '${SubDomain}.${ProjectSubDomain}.${Domain}'
+    #             # - Field: path-pattern
+    #             #   Values:
+    #             #     - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupProduction
+    #               Type: forward
+    # ListenerRuleHTTP2:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref LoadBalancerListenerHTTP
+    #         Priority: !Sub ${Priority}00
+    #         Conditions:
+    #             # - Field: host-header
+    #             #   Values:
+    #             #     - !Sub '${SubDomain}.${ProjectSubDomain}.${Domain}'
+    #             - Field: path-pattern
+    #               Values:
+    #                 - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupProduction
+    #               Type: forward
+    # Ticket #732429
+    # ListenerRuleHTTPDev:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref DevLoadBalancerListenerHTTP
+    #         Priority:  !Ref Priority
+    #         Conditions:
+    #             - Field: host-header
+    #               Values:
+    #                 - !Sub '${SubDomain}.dev.${ProjectSubDomain}.${Domain}'
+    #             # - Field: path-pattern
+    #             #   Values:
+    #             #     - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupDevelopment
+    #               Type: forward
+    # ListenerRuleHTTPDev2:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref DevLoadBalancerListenerHTTP
+    #         Priority:  !Sub ${Priority}00
+    #         Conditions:
+    #             # - Field: host-header
+    #             #   Values:
+    #             #     - !Sub '${SubDomain}.dev.${ProjectSubDomain}.${Domain}'
+    #             - Field: path-pattern
+    #               Values:
+    #                 - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupDevelopment
+    #               Type: forward
+    # ListenerRuleHTTPCanary:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref CanaryLoadBalancerListenerHTTP
+    #         Priority: !Ref Priority
+    #         Conditions:
+    #             - Field: host-header
+    #               Values:
+    #                 - !Sub '${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+    #             # - Field: path-pattern
+    #             #   Values:
+    #             #     - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupCanary
+    #               Type: forward
+    # ListenerRuleHTTPCanary2:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref CanaryLoadBalancerListenerHTTP
+    #         Priority: !Sub ${Priority}00
+    #         Conditions:
+    #             # - Field: host-header
+    #             #   Values:
+    #             #     - !Sub '${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+    #             - Field: path-pattern
+    #               Values:
+    #                 - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupCanary
+    #               Type: forward
+    # ListenerRuleHTTPStaging:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref StagingLoadBalancerListenerHTTP
+    #         Priority: !Ref Priority
+    #         Conditions:
+    #             - Field: host-header
+    #               Values:
+    #                 - !Sub '${SubDomain}.staging.${ProjectSubDomain}.${Domain}'
+    #             # - Field: path-pattern
+    #             #   Values:
+    #             #     - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupStaging
+    #               Type: forward
+    # ListenerRuleHTTPStaging2:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref StagingLoadBalancerListenerHTTP
+    #         Priority: !Sub ${Priority}00
+    #         Conditions:
+    #             # - Field: host-header
+    #             #   Values:
+    #             #     - !Sub '${SubDomain}.staging.${ProjectSubDomain}.${Domain}'
+    #             - Field: path-pattern
+    #               Values:
+    #                 - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupStaging
+    #               Type: forward
+    ListenerRuleHTTPS:
+        Type: AWS::ElasticLoadBalancingV2::ListenerRule
+        Properties:
+            ListenerArn: !Ref LoadBalancerListenerHTTPS
+            Priority: !Ref Priority
+            Conditions:
+                - Field: host-header
+                  Values:
+                    - !Sub '${SubDomain}.${ProjectSubDomain}.${Domain}'
+                # - Field: path-pattern
+                #   Values:
+                #     - !Sub '/${SubDomain}/*'
+            Actions:
+                - TargetGroupArn: !Ref TargetGroupProduction
+                  Type: forward
+    # ListenerRuleHTTPS2:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref LoadBalancerListenerHTTPS
+    #         Priority: !Sub ${Priority}00
+    #         Conditions:
+    #             # - Field: host-header
+    #             #   Values:
+    #             #     - !Sub '${SubDomain}.${ProjectSubDomain}.${Domain}'
+    #             - Field: path-pattern
+    #               Values:
+    #                 - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupProduction
+    #               Type: forward
+    ListenerRuleHTTPSDev:
+        Type: AWS::ElasticLoadBalancingV2::ListenerRule
+        Properties:
+            ListenerArn: !Ref DevLoadBalancerListenerHTTPS
+            Priority: !Ref Priority
+            Conditions:
+                - Field: host-header
+                  Values:
+                    - !Sub '${SubDomain}.dev.${ProjectSubDomain}.${Domain}'
+                # - Field: path-pattern
+                #   Values:
+                #     - !Sub '/${SubDomain}/*'
+            Actions:
+                - TargetGroupArn: !Ref TargetGroupDevelopment
+                  Type: forward
+    # Ticket #732429
+    # ListenerRuleHTTPSDev2:
+    #     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    #     Properties:
+    #         ListenerArn: !Ref DevLoadBalancerListenerHTTPS
+    #         Priority: !Sub ${Priority}00
+    #         Conditions:
+    #             # - Field: host-header
+    #             #   Values:
+    #             #     - !Sub '${SubDomain}.dev.${ProjectSubDomain}.${Domain}'
+    #             - Field: path-pattern
+    #               Values:
+    #                 - !Sub '/${SubDomain}/*'
+    #         Actions:
+    #             - TargetGroupArn: !Ref TargetGroupDevelopment
+    #               Type: forward
+    ListenerRuleHTTPSCanary:
+        Type: AWS::ElasticLoadBalancingV2::ListenerRule
+        Properties:
+            ListenerArn: !Ref CanaryLoadBalancerListenerHTTPS
+            Priority: !Ref Priority
+            Conditions:
+                - Field: host-header
+                  Values:
+                    - !Sub '${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+                # - Field: path-pattern
+                #   Values:
+                #     - !Sub '/${SubDomain}/*'
+            Actions:
+                - TargetGroupArn: !Ref TargetGroupCanary
+                  Type: forward
+    ListenerRuleHTTPSCanary2:
+        Type: AWS::ElasticLoadBalancingV2::ListenerRule
+        Properties:
+            ListenerArn: !Ref CanaryLoadBalancerListenerHTTPS
+            Priority: !Sub ${Priority}00
+            Conditions:
+                # - Field: host-header
+                #   Values:
+                #     - !Sub '${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+                - Field: path-pattern
+                  Values:
+                    - !Sub '/${SubDomain}/*'
+            Actions:
+                - TargetGroupArn: !Ref TargetGroupCanary
+                  Type: forward
+    ListenerRuleHTTPSStaging:
+        Type: AWS::ElasticLoadBalancingV2::ListenerRule
+        Properties:
+            ListenerArn: !Ref StagingLoadBalancerListenerHTTPS
+            Priority: !Ref Priority
+            Conditions:
+                - Field: host-header
+                  Values:
+                    - !Sub '${SubDomain}.staging.${ProjectSubDomain}.${Domain}'
+                # - Field: path-pattern
+                #   Values:
+                #     - !Sub '/${SubDomain}/*'
+            Actions:
+                - TargetGroupArn: !Ref TargetGroupStaging
+                  Type: forward
+    ListenerRuleHTTPSStaging2:
+        Type: AWS::ElasticLoadBalancingV2::ListenerRule
+        Properties:
+            ListenerArn: !Ref StagingLoadBalancerListenerHTTPS
+            Priority: !Sub ${Priority}00
+            Conditions:
+                # - Field: host-header
+                #   Values:
+                #     - !Sub '${SubDomain}.staging.${ProjectSubDomain}.${Domain}'
+                - Field: path-pattern
+                  Values:
+                    - !Sub '/${SubDomain}/*'
+            Actions:
+                - TargetGroupArn: !Ref TargetGroupStaging
+                  Type: forward
+    # TARGET GROUPS
+
+    TargetGroupDevelopment:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            VpcId: !Ref VpcId
+            Port: 80
+            Protocol: HTTP
+            Matcher:
+                HttpCode: 200-299
+            HealthCheckIntervalSeconds: 5
+            HealthCheckPath: /
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 4
+            HealthyThresholdCount: 2
+            TargetType: "ip" 
+            TargetGroupAttributes:
+                - Key: deregistration_delay.timeout_seconds
+                  Value: 30
+    TargetGroupCanary:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            VpcId: !Ref VpcId
+            Port: 80
+            Protocol: HTTP
+            Matcher:
+                HttpCode: 200-299
+            HealthCheckIntervalSeconds: 5
+            HealthCheckPath: /
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 4
+            HealthyThresholdCount: 2
+            TargetType: "ip" 
+            TargetGroupAttributes:
+                - Key: deregistration_delay.timeout_seconds
+                  Value: 30
+    TargetGroupStaging:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            VpcId: !Ref VpcId
+            Port: 80
+            Protocol: HTTP
+            Matcher:
+                HttpCode: 200-299
+            HealthCheckIntervalSeconds: 5
+            HealthCheckPath: /
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 4
+            HealthyThresholdCount: 2
+            TargetType: "ip" 
+            TargetGroupAttributes:
+                - Key: deregistration_delay.timeout_seconds
+                  Value: 30
+    TargetGroupProduction:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            VpcId: !Ref VpcId
+            Port: 80
+            Protocol: HTTP 
+            Matcher:
+                HttpCode: 200-299
+            HealthCheckIntervalSeconds: 5
+            HealthCheckPath: /
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 4
+            HealthyThresholdCount: 2
+            TargetType: "ip" 
+            TargetGroupAttributes:
+                - Key: deregistration_delay.timeout_seconds
+                  Value: 30
+
+    CodeCommitRepo:
+        Type: AWS::CodeCommit::Repository
+        Properties:
+            RepositoryName: !Ref ContainerName
+            RepositoryDescription: !Join ["-",[!Ref ContainerName, "CICD Sourcecode Repository"]]
+    FargateServiceDevelopment:
+        DependsOn: ['TaskDefinitionDevelopment']
+        Type: AWS::ECS::Service
+        Properties:
+            Cluster: !Ref ClusterArn
+            DesiredCount: !Ref DesiredCount
+            TaskDefinition: !Ref TaskDefinitionDevelopment
+            LaunchType: FARGATE
+            NetworkConfiguration:
+                AwsvpcConfiguration:
+                    AssignPublicIp: ENABLED
+                    SecurityGroups:
+                        - !Ref SecurityGroup
+                    Subnets: 
+                        - !Ref PublicSubnet1
+                        - !Ref PublicSubnet2
+            LoadBalancers:
+                - ContainerName: !Ref FamilyDevelopment
+                  ContainerPort: 80
+                  TargetGroupArn: !Ref TargetGroupDevelopment
+    FargateServiceCanary:
+        Type: AWS::ECS::Service
+        DependsOn: ['TaskDefinitionCanary']
+        Properties:
+            Cluster: !Ref ClusterArn
+            DesiredCount: !Ref DesiredCount
+            TaskDefinition: !Ref TaskDefinitionCanary
+            LaunchType: FARGATE
+            NetworkConfiguration:
+                AwsvpcConfiguration:
+                    AssignPublicIp: ENABLED
+                    SecurityGroups:
+                        - !Ref SecurityGroup
+                    Subnets: 
+                        - !Ref PublicSubnet1
+                        - !Ref PublicSubnet2
+            LoadBalancers:
+                - ContainerName: !Ref FamilyCanary
+                  ContainerPort: 80
+                  TargetGroupArn: !Ref TargetGroupCanary
+    FargateServiceStaging:
+        Type: AWS::ECS::Service
+        DependsOn: ['TaskDefinitionStaging']
+        Properties:
+            Cluster: !Ref ClusterArn
+            DesiredCount: !Ref DesiredCount
+            TaskDefinition: !Ref TaskDefinitionStaging
+            LaunchType: FARGATE
+            NetworkConfiguration:
+                AwsvpcConfiguration:
+                    AssignPublicIp: ENABLED
+                    SecurityGroups:
+                        - !Ref SecurityGroup
+                    Subnets: 
+                        - !Ref PublicSubnet1
+                        - !Ref PublicSubnet2
+            LoadBalancers:
+                - ContainerName: !Ref FamilyStaging
+                  ContainerPort: 80
+                  TargetGroupArn: !Ref TargetGroupStaging
+    FargateServiceProduction:
+        Type: AWS::ECS::Service
+        DependsOn: ['TaskDefinitionProduction']
+        Properties:
+            Cluster: !Ref ClusterArn
+            DesiredCount: !Ref DesiredCount
+            TaskDefinition: !Ref TaskDefinitionProduction
+            LaunchType: FARGATE
+            NetworkConfiguration:
+                AwsvpcConfiguration:
+                    AssignPublicIp: ENABLED
+                    SecurityGroups:
+                        - !Ref SecurityGroup
+                    Subnets: 
+                        - !Ref PublicSubnet1
+                        - !Ref PublicSubnet2
+            LoadBalancers:
+                - ContainerName: !Ref FamilyProduction
+                  ContainerPort: 80
+                  TargetGroupArn: !Ref TargetGroupProduction
+    RepositoryDevelopment:
+        Type: AWS::ECR::Repository
+        Properties: 
+            RepositoryName: !Join ["-",[!Ref ContainerName,"development"]]
+    RepositoryCanary:
+        Type: AWS::ECR::Repository
+        Properties: 
+            RepositoryName: !Join ["-",[!Ref ContainerName,"canary"]]
+    RepositoryStaging:
+        Type: AWS::ECR::Repository
+        Properties: 
+            RepositoryName: !Join ["-",[!Ref ContainerName,"staging"]]
+    RepositoryProduction:
+        Type: AWS::ECR::Repository
+        Properties: 
+            RepositoryName: !Join ["-",[!Ref ContainerName,"production"]]
+    CodeBuildServiceRole:
+        Type: AWS::IAM::Role
+        Properties:
+            Path: /
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                        Service: codebuild.amazonaws.com
+                    Action: sts:AssumeRole
+            Policies:
+                - PolicyName: !Join ["",["CodeBuild",!Ref PolicyName]]
+                  PolicyDocument:
+                      Version: 2012-10-17
+                      Statement:
+                          - Resource: "*"
+                            Effect: Allow
+                            Action:
+                                - logs:CreateLogGroup
+                                - logs:CreateLogStream
+                                - logs:PutLogEvents
+                                - ecr:GetAuthorizationToken
+                                - ec2:*
+                          - Resource: !Sub 'arn:aws:s3:::${ArtifactBucketName}/*'
+                            Effect: Allow
+                            Action:
+                                - s3:GetObject
+                                - s3:PutObject
+                                - s3:GetObjectVersion 
+                                - s3:DeleteObject 
+                          - Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*'
+                            Effect: Allow
+                            Action:
+                                - ecr:GetDownloadUrlForLayer
+                                - ecr:BatchGetImage
+                                - ecr:BatchCheckLayerAvailability
+                                - ecr:PutImage
+                                - ecr:InitiateLayerUpload
+                                - ecr:UploadLayerPart
+                                - ecr:CompleteLayerUpload
+    CodePipelineServiceRole:
+        Type: AWS::IAM::Role
+        Properties:
+            Path: /
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                        Service: codepipeline.amazonaws.com
+                    Action: sts:AssumeRole
+            ManagedPolicyArns:
+                - arn:aws:iam::aws:policy/AWSCodeCommitPowerUser      
+            Policies:
+                - PolicyName: !Join ["",["CodePipeline",!Ref PolicyName]]
+                  PolicyDocument:
+                      Version: 2012-10-17
+                      Statement:
+                          - Resource:
+                              - !Sub 'arn:aws:s3:::${ArtifactBucketName}/*'
+                            Effect: Allow
+                            Action:
+                                - s3:PutObject
+                                - s3:GetObject
+                                - s3:GetObjectVersion
+                                - s3:GetBucketVersioning
+                          - Resource: "*"
+                            Effect: Allow
+                            Action:
+                                - ecs:DescribeServices
+                                - ecs:DescribeTaskDefinition
+                                - ecs:DescribeTasks
+                                - ecs:ListTasks
+                                - ecs:RegisterTaskDefinition
+                                - ecs:UpdateService
+                                - codebuild:StartBuild
+                                - codebuild:BatchGetBuilds
+                                - iam:PassRole
+                                - codecommit:UploadArchive
+                                - sns:Publish
+                                - cloudformation:Describe
+                                - cloudformation:EstimateTemplateCost
+                                - cloudformation:Get*
+                                - cloudformation:List*
+                                - cloudformation:ValidateTemplate
+                                - cloudformation:UpdateStack
+                                - cloudformation:CreateStack
+    CodeBuildProjectDevelopment:
+        Type: AWS::CodeBuild::Project
+        Properties:
+            VpcConfig:
+                VpcId: !Ref VpcId
+                Subnets: [!Ref PrivateSubnet1,!Ref PrivateSubnet2]
+                SecurityGroupIds: [!Ref SecurityGroup]
+            Artifacts:
+                Type: CODEPIPELINE
+            Source:
+                Type: CODEPIPELINE
+            Environment:
+                ComputeType: BUILD_GENERAL1_SMALL
+                Image: aws/codebuild/docker:17.09.0
+                Type: LINUX_CONTAINER
+                EnvironmentVariables:
+                    - Name: AWS_DEFAULT_REGION
+                      Value: !Ref AWS::Region
+                    - Name: REPOSITORY_URI
+                      Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${FamilyDevelopment}'
+                    - Name: Family
+                      Value: !Ref FamilyDevelopment
+                    - Name: Environment
+                      Value: Development
+                    - Name: SERVICE_NAME 
+                      Value: !Ref FamilyDevelopment
+
+                    - Name: CACHE_DRIVER
+                      Value: file
+                    - Name: QUEUE_DRIVER
+                      Value: sync
+
+                    - Name: APP_TIMEZONE
+                      Value: Asia/Manila
+                    - Name: APP_ENV
+                      Value: development
+                    - Name: APP_KEY 
+                      Value: base64:qS1JoSLAELbJS+jrobkLSufg1eIyLZmozWnif07QpzY=
+                    - Name: APP_DEBUG
+                      Value: 1
+                    - Name: LOG_CHANNEL 
+                      Value: errorlog
+                    - Name: APP_URL 
+                      Value: !Sub https://${SubDomain}.dev.${ProjectSubDomain}.${Domain}/ #${SubDomain}
+
+
+                    - Name: DB_HOST
+                      Value: rush-revamp-dev.c9dv8axo4lmn.ap-southeast-1.rds.amazonaws.com
+                    - Name: DB_USERNAME
+                      Value: revampadmin
+                    - Name: DB_PASSWORD
+                      Value: "!3UW+!(C"
+                    - Name: DB_DATABASE
+                      Value: !Sub dev-${ContainerName}
+
+                    - Name: SERVICE_ENDPOINT
+                      Value: https://rush-proxy.dev.api-rush.globedv.com/
+                    - Name: EVENT_SERVICE_URL
+                      Value: !Sub https://events-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: TARGET_SEGMENT_SERVICE_URL
+                      Value: !Sub https://target-segment-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: MAIL_SERVICE_URL
+                      Value: !Sub https://mail-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: SMS_SERVICE_URL
+                      Value: !Sub https://sms-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: PUSH_SERVICE_URL
+                      Value: !Sub https://notification-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: MERCHANT_SERVICE_URL
+                      Value: !Sub https://merchant-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: CUSTOMER_SERVICE_URL
+                      Value: !Sub https://customer-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: POINTS_SERVICE_URL
+                      Value: !Sub https://points-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: ACHIEVEMENT_SERVICE_URL
+                      Value: !Sub https://achievement-service.dev.${ProjectSubDomain}.${Domain} #achievement-service
+                    - Name: EMPLOYEE_SERVICE_URL
+                      Value: !Sub https://employee-auth-service.dev.${ProjectSubDomain}.${Domain} #employee-auth-service
+                    - Name: NOTIFICATION_SERVICE_URL
+                      Value: !Sub https://notification-service.dev.${ProjectSubDomain}.${Domain} #notification-service
+                    - Name: TRANSACTION_SERVICE_URL
+                      Value: !Sub https://transactions-service.dev.${ProjectSubDomain}.${Domain} #transactions-service
+
+                    - Name: EVENT_SERVICE
+                      Value: !Sub https://events-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: TARGET_SEGMENT_SERVICE
+                      Value: !Sub https://target-segment-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: MAIL_SERVICE
+                      Value: !Sub https://mail-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: SMS_SERVICE
+                      Value: !Sub https://sms-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: PUSH_SERVICE
+                      Value: !Sub https://notification-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: MERCHANT_SERVICE
+                      Value: !Sub https://merchant-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: CUSTOMER_SERVICE
+                      Value: !Sub https://customer-service.dev.${ProjectSubDomain}.${Domain}
+                    - Name: POINTS_SERVICE
+                      Value: !Sub https://points-service.dev.${ProjectSubDomain}.${Domain}
+
+                    # - Name: SERVICE_ENDPOINT
+                    #   Value: !Sub https://dev.rush-revamp.globedv.com
+
+                    - Name: GLOBELABS_URL
+                      Value: https://devapi.globelabs.com.ph
+                    - Name: GLOBELABS_APP_ID
+                      Value: Bd6LInMXAzhMoc4BeRTXMKhB5d5LIKbk
+                    - Name: GLOBELABS_APP_SECRET
+                      Value: da571a2bb8c59e785195b128444dedea8357ce84f9382be374c4b6caf082d6eb
+                    - Name: GLOBELABS_PASSWORD
+                      Value: hlFGlxfntT
+                    - Name: GLOBELABS_CODE
+                      Value: 21585620
+
+                    - Name: OTP_APP_ID
+                      Value: Bd6LInMXAzhMoc4BeRTXMKhB5d5LIKbk
+                    - Name: OTP_APP_SECRET
+                      Value: da571a2bb8c59e785195b128444dedea8357ce84f9382be374c4b6caf082d6eb
+                    - Name: OTP_PASSWORD
+                      Value: hlFGlxfntT
+                    - Name: OTP_CODE
+                      Value: 21585620
+
+                    - Name: MAIL_DRIVER
+                      Value: smtp
+                    - Name: MAIL_HOST
+                      Value: email-smtp.us-east-1.amazonaws.com
+                    - Name: MAIL_PORT
+                      Value: 25
+                    - Name: MAIL_ENCRYPTION
+                      Value: tls
+                    - Name: MAIL_FROM_ADDRESS
+                      Value: info@rush.ph
+                    - Name: SES_KEY
+                      Value: AKIAIQUWBJ5XJ6UGRBYA
+                    - Name: SES_SECRET
+                      Value: AoW8NsX6ao3DWYUsk6TsU1mjv9RopDk5ujC51HL+pGe5
+                    - Name: MAIL_FROM_NAME
+                      Value: Rush PH
+                    - Name: S3_REGION
+                      Value: !Ref AWS::Region
+                    - Name: SNS_REGION
+                      Value: !Ref AWS::Region
+                    - Name: S3_BUCKET
+                      Value: dev.rush-revamp.globedv.com
+
+                    # - Name: AWS_BUCKET 
+                    #   Value: rush-revamp-dev-s3
+                    # - Name: AWS_URL
+                    #   Value: http://rush-revamp-dev-s3.s3.amazonaws.com/
+                    - Name: CONTAINER_ROLE
+                      Value:  !Ref ContainerRole
+
+                    - Name: SNS_ANDRIOD_PUSHNOTIFICATION
+                      Value: arn:aws:sns:ap-southeast-1:518132289279:app/GCM/Rush-Revamp-Android-Dev
+                    - Name: SNS_IOS_PUSHNOTIFICATION
+                      Value: arn:aws:sns:ap-southeast-1:518132289279:app/APNS_SANDBOX/Rush-Revamp-IOS
+
+                    # - Name: AWS_ACCESS_KEY_ID
+                    #   Value: AKIAJGADSRHPU7O5D2DA
+                    # - Name: AWS_SECRET_ACCESS_KEY
+                    #   Value: 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
+                    - Name: S3_KEY
+                      Value: AKIAJGADSRHPU7O5D2DA
+                    - Name: SQS_KEY
+                      Value: AKIAJGADSRHPU7O5D2DA
+                    - Name: S3_SECRET
+                      Value: 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
+                    - Name: SQS_SECRET
+                      Value: y3OhYNZDrLqQXVJT7F8MtJeVM9pBf4v8b0jaeJGz
+                    - Name: SQS_REGION
+                      Value: ap-southeast-1
+                    - Name: SQS_URL
+                      Value: !Ref DevQueue
+                    - Name: MAIL_USERNAME
+                      Value: AKIAJ4FCUVESBIMVG2RQ
+                    - Name: MAIL_PASSWORD
+                      Value: ApJSZdLm9Je34QdxcIVQ1Gqj00qk3ZzDUkmmQVQoC8c8
+                    - Name: SNS_KEY
+                      Value: AKIAIV7TPKZP462W5LDA
+                    - Name: SNS_SECRET
+                      Value: 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
+                    - Name: MERCHANT_URL
+                      Value: http://dev.cms.rush-revamp.globedv.com
+                    - Name: ORGANIZATION_SERVICE_URL
+                      Value: !Sub https://organization-service.dev.${ProjectSubDomain}.${Domain}/
+                    - Name: ALASKASOSYO_UUID
+                      Value: 40b0c398-a41e-45b5-8cc0-e4e75dc09de5
+            Name: !Join ["-",[!Ref ContainerName,"development"]]
+            ServiceRole: !Ref CodeBuildServiceRole
+    CodeBuildProjectCanary:
+        Type: AWS::CodeBuild::Project
+        Properties:
+            VpcConfig:
+                VpcId: !Ref VpcId
+                Subnets: [!Ref PrivateSubnet1,!Ref PrivateSubnet2]
+                SecurityGroupIds: [!Ref SecurityGroup]
+            Artifacts:
+                Type: CODEPIPELINE
+            Source:
+                Type: CODEPIPELINE
+            Environment:
+                ComputeType: BUILD_GENERAL1_SMALL
+                Image: aws/codebuild/docker:17.09.0
+                Type: LINUX_CONTAINER
+                EnvironmentVariables:
+                    - Name: AWS_DEFAULT_REGION
+                      Value: !Ref AWS::Region
+                    - Name: REPOSITORY_URI
+                      Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${FamilyCanary}'
+                    - Name: Family
+                      Value: !Ref FamilyCanary
+                    - Name: Environment
+                      Value: Canary
+                    - Name: SERVICE_NAME 
+                      Value: !Ref FamilyCanary
+
+                    - Name: CACHE_DRIVER
+                      Value: file
+                    - Name: QUEUE_DRIVER
+                      Value: sync
+
+                    - Name: APP_TIMEZONE
+                      Value: Asia/Manila
+                    - Name: APP_ENV
+                      Value: canary
+                    - Name: APP_KEY 
+                      Value: base64:qS1JoSLAELbJS+jrobkLSufg1eIyLZmozWnif07QpzY=
+                    - Name: APP_DEBUG
+                      Value: 1
+                    - Name: LOG_CHANNEL 
+                      Value: errorlog
+                    - Name: APP_URL 
+                      Value: !Sub https://${SubDomain}.canary.${ProjectSubDomain}.${Domain}/ #${SubDomain}
+
+
+                    - Name: DB_HOST
+                      Value: rush-revamp-dev.c9dv8axo4lmn.ap-southeast-1.rds.amazonaws.com
+                    - Name: DB_USERNAME
+                      Value: revampadmin
+                    - Name: DB_PASSWORD
+                      Value: "!3UW+!(C"
+                    - Name: DB_DATABASE
+                      Value: !Sub canary-${ContainerName}
+
+                    - Name: SERVICE_ENDPOINT
+                      Value: https://rush-proxy.canary.api-rush.globedv.com/
+                    - Name: EVENT_SERVICE_URL
+                      Value: !Sub https://events-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: TARGET_SEGMENT_SERVICE_URL
+                      Value: !Sub https://target-segment-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: MAIL_SERVICE_URL
+                      Value: !Sub https://mail-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: SMS_SERVICE_URL
+                      Value: !Sub https://sms-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: PUSH_SERVICE_URL
+                      Value: !Sub https://notification-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: MERCHANT_SERVICE_URL
+                      Value: !Sub https://merchant-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: CUSTOMER_SERVICE_URL
+                      Value: !Sub https://customer-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: POINTS_SERVICE_URL
+                      Value: !Sub https://points-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: ACHIEVEMENT_SERVICE_URL
+                      Value: !Sub https://achievement-service.canary.${ProjectSubDomain}.${Domain} #achievement-service
+                    - Name: EMPLOYEE_SERVICE_URL
+                      Value: !Sub https://employee-auth-service.canary.${ProjectSubDomain}.${Domain} #employee-auth-service
+                    - Name: NOTIFICATION_SERVICE_URL
+                      Value: !Sub https://notification-service.canary.${ProjectSubDomain}.${Domain} #notification-service
+                    - Name: TRANSACTION_SERVICE_URL
+                      Value: !Sub https://transactions-service.canary.${ProjectSubDomain}.${Domain} #transactions-service
+
+                    - Name: EVENT_SERVICE
+                      Value: !Sub https://events-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: TARGET_SEGMENT_SERVICE
+                      Value: !Sub https://target-segment-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: MAIL_SERVICE
+                      Value: !Sub https://mail-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: SMS_SERVICE
+                      Value: !Sub https://sms-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: PUSH_SERVICE
+                      Value: !Sub https://notification-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: MERCHANT_SERVICE
+                      Value: !Sub https://merchant-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: CUSTOMER_SERVICE
+                      Value: !Sub https://customer-service.canary.${ProjectSubDomain}.${Domain}
+                    - Name: POINTS_SERVICE
+                      Value: !Sub https://points-service.canary.${ProjectSubDomain}.${Domain}
+
+                    # - Name: SERVICE_ENDPOINT
+                    #   Value: !Sub https://${SubDomain}.canary.${ProjectSubDomain}.${Domain}
+
+                    - Name: GLOBELABS_URL
+                      Value: https://devapi.globelabs.com.ph
+                    - Name: GLOBELABS_APP_ID
+                      Value: Bd6LInMXAzhMoc4BeRTXMKhB5d5LIKbk
+                    - Name: GLOBELABS_APP_SECRET
+                      Value: da571a2bb8c59e785195b128444dedea8357ce84f9382be374c4b6caf082d6eb
+                    - Name: GLOBELABS_PASSWORD
+                      Value: hlFGlxfntT
+                    - Name: GLOBELABS_CODE
+                      Value: 21585620
+
+                    - Name: OTP_APP_ID
+                      Value: Bd6LInMXAzhMoc4BeRTXMKhB5d5LIKbk
+                    - Name: OTP_APP_SECRET
+                      Value: da571a2bb8c59e785195b128444dedea8357ce84f9382be374c4b6caf082d6eb
+                    - Name: OTP_PASSWORD
+                      Value: hlFGlxfntT
+                    - Name: OTP_CODE
+                      Value: 21585620
+
+                    - Name: MAIL_DRIVER
+                      Value: smtp
+                    - Name: MAIL_HOST
+                      Value: email-smtp.us-east-1.amazonaws.com
+                    - Name: MAIL_PORT
+                      Value: 25
+                    - Name: MAIL_ENCRYPTION
+                      Value: tls
+                    - Name: MAIL_FROM_ADDRESS
+                      Value: info@rush.ph
+                    - Name: SES_KEY
+                      Value: AKIAIQUWBJ5XJ6UGRBYA
+                    - Name: SES_SECRET
+                      Value: AoW8NsX6ao3DWYUsk6TsU1mjv9RopDk5ujC51HL+pGe5
+                    - Name: MAIL_FROM_NAME
+                      Value: Rush PH
+                    - Name: S3_REGION 
+                      Value: !Ref AWS::Region
+                    - Name: SNS_REGION
+                      Value: !Ref AWS::Region
+                    - Name: S3_BUCKET
+                      Value: canary.rush-revamp.globedv.com
+
+                    # - Name: AWS_BUCKET 
+                    #   Value: rush-revamp-canary-s3
+                    # - Name: AWS_URL
+                    #   Value: http://rush-revamp-canary-s3.s3.amazonaws.com/
+                    - Name: CONTAINER_ROLE
+                      Value:  !Ref ContainerRole
+
+                    - Name: SNS_ANDRIOD_PUSHNOTIFICATION
+                      Value: arn:aws:sns:ap-southeast-1:518132289279:app/GCM/Rush-Revamp-Android-Dev
+                    - Name: SNS_IOS_PUSHNOTIFICATION
+                      Value: arn:aws:sns:ap-southeast-1:518132289279:app/APNS_SANDBOX/Rush-Revamp-IOS
+
+                    # - Name: AWS_ACCESS_KEY_ID
+                    #   Value: AKIAJGADSRHPU7O5D2DA
+                    # - Name: AWS_SECRET_ACCESS_KEY
+                    #   Value: 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
+                    - Name: S3_KEY
+                      Value: AKIAJGADSRHPU7O5D2DA
+                    - Name: SQS_KEY
+                      Value: AKIAJGADSRHPU7O5D2DA
+                    - Name: S3_SECRET
+                      Value: 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
+                    - Name: MAIL_USERNAME
+                      Value: AKIAJ4FCUVESBIMVG2RQ
+                    - Name: MAIL_PASSWORD
+                      Value: ApJSZdLm9Je34QdxcIVQ1Gqj00qk3ZzDUkmmQVQoC8c8
+                    - Name: SNS_KEY
+                      Value: AKIAIV7TPKZP462W5LDA
+                    - Name: SNS_SECRET
+                      Value: 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
+                    - Name: SQS_SECRET
+                      Value: y3OhYNZDrLqQXVJT7F8MtJeVM9pBf4v8b0jaeJGz
+                    - Name: SQS_REGION
+                      Value: ap-southeast-1
+                    - Name: SQS_URL
+                      Value: !Ref CanaryQueue
+                    - Name: MERCHANT_URL
+                      Value: http://canary.cms.rush-revamp.globedv.com
+                    - Name: ORGANIZATION_SERVICE_URL
+                      Value: !Sub https://organization-service.canary.${ProjectSubDomain}.${Domain}/
+                    - Name: ALASKASOSYO_UUID
+                      Value: 40b0c398-a41e-45b5-8cc0-e4e75dc09de5
+            Name: !Join ["-",[!Ref ContainerName,"canary"]]
+            ServiceRole: !Ref CodeBuildServiceRole        
+    CodeBuildProjectStaging:
+        Type: AWS::CodeBuild::Project
+        Properties:
+            VpcConfig:
+                VpcId: !Ref VpcId
+                Subnets: [!Ref PrivateSubnet1,!Ref PrivateSubnet2]
+                SecurityGroupIds: [!Ref SecurityGroup]
+            Artifacts:
+                Type: CODEPIPELINE
+            Source:
+                Type: CODEPIPELINE
+            Environment:
+                ComputeType: BUILD_GENERAL1_SMALL
+                Image: aws/codebuild/docker:17.09.0
+                Type: LINUX_CONTAINER
+                EnvironmentVariables:
+                    - Name: AWS_DEFAULT_REGION
+                      Value: !Ref AWS::Region
+                    - Name: REPOSITORY_URI
+                      Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${FamilyStaging}'
+                    - Name: Family
+                      Value: !Ref FamilyStaging
+                    - Name: Environment
+                      Value: Staging
+                    - Name: SERVICE_NAME 
+                      Value: !Ref FamilyStaging
+
+                    - Name: CACHE_DRIVER
+                      Value: file
+                    - Name: QUEUE_DRIVER
+                      Value: sync
+
+                    - Name: APP_TIMEZONE
+                      Value: Asia/Manila
+                    - Name: APP_ENV
+                      Value: staging
+                    - Name: APP_KEY 
+                      Value: base64:qS1JoSLAELbJS+jrobkLSufg1eIyLZmozWnif07QpzY=
+                    - Name: APP_DEBUG
+                      Value: 0
+                    - Name: LOG_CHANNEL 
+                      Value: errorlog
+                    - Name: APP_URL 
+                      Value: !Sub https://${SubDomain}.staging.${ProjectSubDomain}.${Domain}/ #${SubDomain}
+
+
+                    - Name: DB_HOST
+                      Value: rush-revamp-dev.c9dv8axo4lmn.ap-southeast-1.rds.amazonaws.com
+                    - Name: DB_USERNAME
+                      Value: revampadmin
+                    - Name: DB_PASSWORD
+                      Value: "!3UW+!(C"
+                    - Name: DB_DATABASE
+                      Value: !Sub staging-${ContainerName}
+
+                    - Name: SERVICE_ENDPOINT
+                      Value: https://rush-proxy.staging.api-rush.globedv.com/
+                    - Name: EVENT_SERVICE_URL
+                      Value: !Sub https://events-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: TARGET_SEGMENT_SERVICE_URL
+                      Value: !Sub https://target-segment-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: MAIL_SERVICE_URL
+                      Value: !Sub https://mail-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: SMS_SERVICE_URL
+                      Value: !Sub https://sms-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: PUSH_SERVICE_URL
+                      Value: !Sub https://notification-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: MERCHANT_SERVICE_URL
+                      Value: !Sub https://merchant-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: CUSTOMER_SERVICE_URL
+                      Value: !Sub https://customer-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: POINTS_SERVICE_URL
+                      Value: !Sub https://points-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: ACHIEVEMENT_SERVICE_URL
+                      Value: !Sub https://achievement-service.staging.${ProjectSubDomain}.${Domain}/ #achievement-service
+                    - Name: EMPLOYEE_SERVICE_URL
+                      Value: !Sub https://employee-auth-service.staging.${ProjectSubDomain}.${Domain}/ #employee-auth-service
+                    - Name: NOTIFICATION_SERVICE_URL
+                      Value: !Sub https://notification-service.staging.${ProjectSubDomain}.${Domain}/ #notification-service
+                    - Name: TRANSACTION_SERVICE_URL
+                      Value: !Sub https://transactions-service.staging.${ProjectSubDomain}.${Domain}/ #transactions-service
+
+                    - Name: EVENT_SERVICE
+                      Value: !Sub https://events-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: TARGET_SEGMENT_SERVICE
+                      Value: !Sub https://target-segment-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: MAIL_SERVICE
+                      Value: !Sub https://mail-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: SMS_SERVICE
+                      Value: !Sub https://sms-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: PUSH_SERVICE
+                      Value: !Sub https://notification-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: MERCHANT_SERVICE
+                      Value: !Sub https://merchant-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: CUSTOMER_SERVICE
+                      Value: !Sub https://customer-service.staging.${ProjectSubDomain}.${Domain}
+                    - Name: POINTS_SERVICE
+                      Value: !Sub https://points-service.staging.${ProjectSubDomain}.${Domain}
+
+                    # - Name: SERVICE_ENDPOINT
+                    #   Value: !Sub https://${SubDomain}.staging.${ProjectSubDomain}.${Domain}
+
+                    - Name: GLOBELABS_URL
+                      Value: https://devapi.globelabs.com.ph
+                    - Name: GLOBELABS_APP_ID
+                      Value: Bd6LInMXAzhMoc4BeRTXMKhB5d5LIKbk
+                    - Name: GLOBELABS_APP_SECRET
+                      Value: da571a2bb8c59e785195b128444dedea8357ce84f9382be374c4b6caf082d6eb
+                    - Name: GLOBELABS_PASSWORD
+                      Value: hlFGlxfntT
+                    - Name: GLOBELABS_CODE
+                      Value: 21585620
+
+                    - Name: OTP_APP_ID
+                      Value: Bd6LInMXAzhMoc4BeRTXMKhB5d5LIKbk
+                    - Name: OTP_APP_SECRET
+                      Value: da571a2bb8c59e785195b128444dedea8357ce84f9382be374c4b6caf082d6eb
+                    - Name: OTP_PASSWORD
+                      Value: hlFGlxfntT
+                    - Name: OTP_CODE
+                      Value: 21585620
+
+                    - Name: MAIL_DRIVER
+                      Value: smtp
+                    - Name: MAIL_HOST
+                      Value: email-smtp.us-east-1.amazonaws.com
+                    - Name: MAIL_PORT
+                      Value: 25
+                    - Name: MAIL_ENCRYPTION
+                      Value: tls
+                    - Name: MAIL_FROM_ADDRESS
+                      Value: info@rush.ph
+                    - Name: SES_KEY
+                      Value: AKIAIQUWBJ5XJ6UGRBYA
+                    - Name: SES_SECRET
+                      Value: AoW8NsX6ao3DWYUsk6TsU1mjv9RopDk5ujC51HL+pGe5
+                    - Name: MAIL_FROM_NAME
+                      Value: Rush PH
+                    - Name: S3_REGION 
+                      Value: !Ref AWS::Region
+                    - Name: SNS_REGION
+                      Value: !Ref AWS::Region
+                    - Name: S3_BUCKET
+                      Value: staging.rush-revamp.globedv.com
+
+                    # - Name: AWS_BUCKET 
+                    #   Value: rush-revamp-dev-s3
+                    # - Name: AWS_URL
+                    #   Value: http://rush-revamp-dev-s3.s3.amazonaws.com/
+                    - Name: CONTAINER_ROLE
+                      Value:  !Ref ContainerRole
+
+                    - Name: SNS_ANDRIOD_PUSHNOTIFICATION
+                      Value: arn:aws:sns:ap-southeast-1:518132289279:app/GCM/Rush-Revamp-Android-Dev
+                    - Name: SNS_IOS_PUSHNOTIFICATION
+                      Value: arn:aws:sns:ap-southeast-1:518132289279:app/APNS_SANDBOX/Rush-Revamp-IOS
+
+                    # - Name: AWS_ACCESS_KEY_ID
+                    #   Value: AKIAJGADSRHPU7O5D2DA
+                    # - Name: AWS_SECRET_ACCESS_KEY
+                    #   Value: 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
+                    - Name: S3_KEY
+                      Value: AKIAJGADSRHPU7O5D2DA
+                    - Name: SQS_KEY
+                      Value: AKIAJGADSRHPU7O5D2DA
+                    - Name: S3_SECRET
+                      Value: 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
+                    - Name: MAIL_USERNAME
+                      Value: AKIAJ4FCUVESBIMVG2RQ
+                    - Name: MAIL_PASSWORD
+                      Value: ApJSZdLm9Je34QdxcIVQ1Gqj00qk3ZzDUkmmQVQoC8c8
+                    - Name: SNS_KEY
+                      Value: AKIAIV7TPKZP462W5LDA
+                    - Name: SNS_SECRET
+                      Value: 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
+                    - Name: SQS_SECRET
+                      Value: y3OhYNZDrLqQXVJT7F8MtJeVM9pBf4v8b0jaeJGz
+                    - Name: SQS_REGION
+                      Value: ap-southeast-1
+                    - Name: SQS_URL
+                      Value: !Ref StagingQueue
+                    - Name: MERCHANT_URL
+                      Value: http://staging.cms.rush-revamp.globedv.com
+                    - Name: ORGANIZATION_SERVICE_URL
+                      Value: !Sub https://organization-service.staging.${ProjectSubDomain}.${Domain}/
+                    - Name: ALASKASOSYO_UUID
+                      Value: 40b0c398-a41e-45b5-8cc0-e4e75dc09de5
+            Name: !Join ["-",[!Ref ContainerName,"staging"]]
+            ServiceRole: !Ref CodeBuildServiceRole
+    CodeBuildProject:
+        Type: AWS::CodeBuild::Project
+        Properties:
+            VpcConfig:
+                VpcId: !Ref VpcId
+                Subnets: [!Ref PrivateSubnet1,!Ref PrivateSubnet2]
+                SecurityGroupIds: [!Ref SecurityGroup]
+            Artifacts:
+                Type: CODEPIPELINE
+            Source:
+                Type: CODEPIPELINE
+            Environment:
+                ComputeType: BUILD_GENERAL1_SMALL
+                Image: aws/codebuild/docker:17.09.0
+                Type: LINUX_CONTAINER
+                EnvironmentVariables:
+                    - Name: AWS_DEFAULT_REGION
+                      Value: !Ref AWS::Region
+                    - Name: REPOSITORY_URI
+                      Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${FamilyProduction}'
+                    - Name: Family
+                      Value: !Ref FamilyProduction
+                    - Name: Environment
+                      Value: Production
+                    - Name: SERVICE_NAME 
+                      Value: !Ref FamilyProduction
+
+                    - Name: CACHE_DRIVER
+                      Value: file
+                    - Name: QUEUE_DRIVER
+                      Value: sync
+
+                    - Name: APP_TIMEZONE
+                      Value: Asia/Manila
+                    - Name: APP_ENV
+                      Value: production
+                    - Name: APP_KEY 
+                      Value: base64:qS1JoSLAELbJS+jrobkLSufg1eIyLZmozWnif07QpzY=
+                    - Name: APP_DEBUG
+                      Value: 0
+                    - Name: LOG_CHANNEL 
+                      Value: errorlog
+                    - Name: APP_URL 
+                      Value: !Sub https://${SubDomain}.${ProjectSubDomain}.${Domain}/ #${SubDomain}
+
+
+                    - Name: DB_HOST
+                      Value: rush-revamp.c9dv8axo4lmn.ap-southeast-1.rds.amazonaws.com
+                    - Name: DB_USERNAME
+                      Value: revampadmin
+                    - Name: DB_PASSWORD
+                      Value: "xZaNW{q*"
+                    - Name: DB_DATABASE
+                      Value: !Sub ${ContainerName}
+
+                    - Name: SERVICE_ENDPOINT
+                      Value: https://rush-proxy.api-rush.globedv.com/
+                    - Name: EVENT_SERVICE_URL
+                      Value: !Sub https://events-service.${ProjectSubDomain}.${Domain}
+                    - Name: TARGET_SEGMENT_SERVICE_URL
+                      Value: !Sub https://target-segment-service.${ProjectSubDomain}.${Domain}
+                    - Name: MAIL_SERVICE_URL
+                      Value: !Sub https://mail-service.${ProjectSubDomain}.${Domain}
+                    - Name: SMS_SERVICE_URL
+                      Value: !Sub https://sms-service.${ProjectSubDomain}.${Domain}
+                    - Name: PUSH_SERVICE_URL
+                      Value: !Sub https://notification-service.${ProjectSubDomain}.${Domain}
+                    - Name: MERCHANT_SERVICE_URL
+                      Value: !Sub https://merchant-service.${ProjectSubDomain}.${Domain}
+                    - Name: CUSTOMER_SERVICE_URL
+                      Value: !Sub https://customer-service.${ProjectSubDomain}.${Domain}
+                    - Name: POINTS_SERVICE_URL
+                      Value: !Sub https://points-service.${ProjectSubDomain}.${Domain}
+                    - Name: ACHIEVEMENT_SERVICE_URL
+                      Value: !Sub https://achievement-service.${ProjectSubDomain}.${Domain}/ #achievement-service
+                    - Name: EMPLOYEE_SERVICE_URL
+                      Value: !Sub https://employee-auth-service.${ProjectSubDomain}.${Domain}/ #employee-auth-service
+                    - Name: NOTIFICATION_SERVICE_URL
+                      Value: !Sub https://notification-service.${ProjectSubDomain}.${Domain}/ #notification-service
+                    - Name: TRANSACTION_SERVICE_URL
+                      Value: !Sub https://transactions-service.${ProjectSubDomain}.${Domain}/ #transactions-service
+
+                    - Name: EVENT_SERVICE
+                      Value: !Sub https://events-service.${ProjectSubDomain}.${Domain}/ #events-service
+                    - Name: TARGET_SEGMENT_SERVICE
+                      Value: !Sub https://target-segment-service.${ProjectSubDomain}.${Domain}/ #target-segment-service
+                    - Name: MAIL_SERVICE
+                      Value: !Sub https://mail-service.${ProjectSubDomain}.${Domain}/ #mail-service
+                    - Name: SMS_SERVICE
+                      Value: !Sub https://sms-service.${ProjectSubDomain}.${Domain}/ #sms-service
+                    - Name: PUSH_SERVICE
+                      Value: !Sub https://notification-service.${ProjectSubDomain}.${Domain}/ #push-service
+                    - Name: MERCHANT_SERVICE
+                      Value: !Sub https://merchant-service.${ProjectSubDomain}.${Domain}/ #merchant-service
+                    - Name: CUSTOMER_SERVICE
+                      Value: !Sub https://customer-service.${ProjectSubDomain}.${Domain}/ #customer-service
+                    - Name: POINTS_SERVICE
+                      Value: !Sub https://points-service.${ProjectSubDomain}.${Domain}/ #points-service
+
+                    # - Name: SERVICE_ENDPOINT
+                    #   Value: !Sub https://${SubDomain}.${ProjectSubDomain}.${Domain}
+
+                    - Name: GLOBELABS_URL
+                      Value: https://devapi.globelabs.com.ph #https://api.globelabs.com.ph changed to https://devapi.globelabs.com.ph
+                    - Name: GLOBELABS_APP_ID
+                      Value: Bd6LInMXAzhMoc4BeRTXMKhB5d5LIKbk
+                    - Name: GLOBELABS_APP_SECRET
+                      Value: da571a2bb8c59e785195b128444dedea8357ce84f9382be374c4b6caf082d6eb
+                    - Name: GLOBELABS_PASSWORD
+                      Value: hlFGlxfntT
+                    - Name: GLOBELABS_CODE
+                      Value: 21585620
+
+                    - Name: OTP_APP_ID
+                      Value: Bd6LInMXAzhMoc4BeRTXMKhB5d5LIKbk
+                    - Name: OTP_APP_SECRET
+                      Value: da571a2bb8c59e785195b128444dedea8357ce84f9382be374c4b6caf082d6eb
+                    - Name: OTP_PASSWORD
+                      Value: hlFGlxfntT
+                    - Name: OTP_CODE
+                      Value: 21585620
+
+                    - Name: MAIL_DRIVER
+                      Value: smtp
+                    - Name: MAIL_HOST
+                      Value: email-smtp.us-east-1.amazonaws.com
+                    - Name: MAIL_PORT
+                      Value: 25
+                    - Name: MAIL_ENCRYPTION
+                      Value: tls
+                    - Name: MAIL_FROM_ADDRESS
+                      Value: info@rush.ph
+                    - Name: SES_KEY
+                      Value: AKIAIQUWBJ5XJ6UGRBYA
+                    - Name: SES_SECRET
+                      Value: AoW8NsX6ao3DWYUsk6TsU1mjv9RopDk5ujC51HL+pGe5
+                    - Name: MAIL_FROM_NAME
+                      Value: Rush PH
+                    - Name: S3_REGION 
+                      Value: !Ref AWS::Region
+                    - Name: SNS_REGION
+                      Value: !Ref AWS::Region
+                    - Name: S3_BUCKET
+                      Value: rush-revamp.globedv.com
+
+                    # - Name: AWS_BUCKET 
+                    #   Value: rush-revamp-dev-s3
+                    # - Name: AWS_URL
+                    #   Value: http://rush-revamp-dev-s3.s3.amazonaws.com/
+                    - Name: CONTAINER_ROLE
+                      Value:  !Ref ContainerRole
+
+                    - Name: SNS_ANDRIOD_PUSHNOTIFICATION
+                      Value: arn:aws:sns:ap-southeast-1:518132289279:app/GCM/Rush-Revamp-Android-Dev
+                    - Name: SNS_IOS_PUSHNOTIFICATION
+                      Value: arn:aws:sns:ap-southeast-1:518132289279:app/APNS_SANDBOX/Rush-Revamp-IOS
+
+                    # - Name: AWS_ACCESS_KEY_ID
+                    #   Value: AKIAJGADSRHPU7O5D2DA
+                    # - Name: AWS_SECRET_ACCESS_KEY
+                    #   Value: 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
+                    - Name: S3_KEY
+                      Value: AKIAJGADSRHPU7O5D2DA
+                    - Name: SQS_KEY
+                      Value: AKIAJGADSRHPU7O5D2DA
+                    - Name: S3_SECRET
+                      Value: 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
+                    - Name: MAIL_USERNAME
+                      Value: AKIAJ4FCUVESBIMVG2RQ
+                    - Name: MAIL_PASSWORD
+                      Value: ApJSZdLm9Je34QdxcIVQ1Gqj00qk3ZzDUkmmQVQoC8c8
+                    - Name: SNS_KEY
+                      Value: AKIAIV7TPKZP462W5LDA
+                    - Name: SNS_SECRET
+                      Value: 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
+                    - Name: SQS_SECRET
+                      Value: y3OhYNZDrLqQXVJT7F8MtJeVM9pBf4v8b0jaeJGz
+                    - Name: SQS_REGION
+                      Value: ap-southeast-1
+                    - Name: SQS_URL
+                      Value: !Ref ProductionQueue
+                    - Name: MERCHANT_URL
+                      Value: http://cms.rush.ph
+                    - Name: ORGANIZATION_SERVICE_URL
+                      Value: !Sub https://organization-service.${ProjectSubDomain}.${Domain}/
+                    - Name: ALASKASOSYO_UUID
+                      Value: 40b0c398-a41e-45b5-8cc0-e4e75dc09de5
+            Name: !Join ["-",[!Ref ContainerName,"production"]]
+            ServiceRole: !Ref CodeBuildServiceRole
+    DevAmazonCloudWatchEventRole:
+        Type: AWS::IAM::Role
+        DependsOn: [DevelopmentPipeline]
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                    -
+                        Effect: Allow
+                        Principal:
+                            Service:
+                                - events.amazonaws.com
+                        Action: sts:AssumeRole
+            Path: /
+            Policies:
+                -
+                    PolicyName: !Sub ${ContainerName}-dev-pipeline-policy
+                    PolicyDocument:
+                        Version: 2012-10-17
+                        Statement:
+                            -
+                                Effect: Allow
+                                Action: codepipeline:StartPipelineExecution
+                                Resource: !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref DevelopmentPipeline ] ] 
+    DevAmazonCloudWatchEventRule:
+        Type: AWS::Events::Rule
+        DependsOn: [DevelopmentPipeline,DevAmazonCloudWatchEventRole]
+        Properties:
+            EventPattern:
+                source:
+                    - aws.codecommit
+                detail-type:
+                    - 'CodeCommit Repository State Change'
+                resources:
+                    - !Join [ '', [ 'arn:aws:codecommit:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref ContainerName ] ]
+                detail:
+                    event:
+                        - referenceCreated
+                        - referenceUpdated
+                    referenceType:
+                        - branch
+                    referenceName:
+                        - development
+            Targets:
+                -
+                    Arn: 
+                        !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref DevelopmentPipeline ] ]
+                    RoleArn: !GetAtt DevAmazonCloudWatchEventRole.Arn
+                    Id: !Sub ${ContainerName}-codepipeline-DevelopmentPipeline
+    DevelopmentPipeline:
+        Type: AWS::CodePipeline::Pipeline
+        DependsOn: CodeCommitRepo
+        Properties:
+            RoleArn: !GetAtt CodePipelineServiceRole.Arn
+            ArtifactStore:
+                Type: S3
+                Location: !Ref ArtifactBucketName
+            Stages:
+                - Name: Source
+                  Actions:
+                      - Name: App
+                        ActionTypeId:
+                            Category: Source
+                            Owner: AWS
+                            Version: 1
+                            Provider: CodeCommit
+                        Configuration:
+                            BranchName: "development"
+                            RepositoryName: !GetAtt CodeCommitRepo.Name
+                            PollForSourceChanges: false
+                        OutputArtifacts:
+                            - Name: App
+                        RunOrder: 1
+                - Name: DevBuild
+                  Actions:
+                      - Name: BuildApproval
+                        ActionTypeId:
+                            Category: Approval
+                            Owner: AWS
+                            Version: 1
+                            Provider: Manual
+                        Configuration:
+                            NotificationArn: !Ref ApprovalARN
+                            ExternalEntityLink: !Sub 'http://${SubDomain}.dev.${ProjectSubDomain}.${Domain}'
+                            CustomData: !Sub '{"message":"${DeployToDevMsg}","topicARN":"${DevSNSArn}"}'
+                        RunOrder: 1
+                      - Name: DevBuild
+                        ActionTypeId:
+                            Category: Build
+                            Owner: AWS
+                            Version: 1
+                            Provider: CodeBuild
+                        Configuration:
+                            ProjectName: !Ref CodeBuildProjectDevelopment
+                        InputArtifacts:
+                            - Name: App
+                        OutputArtifacts:
+                            - Name: DevelopmentBuildOutput
+                        RunOrder: 2
+                - Name: DevelopmentDeploy
+                  Actions:
+                      - Name: DevelopmentDeploy
+                        ActionTypeId:
+                            Category: Deploy
+                            Owner: AWS
+                            Version: 1
+                            Provider: ECS
+                        Configuration:
+                            ClusterName: !Ref Cluster
+                            ServiceName: !Ref FargateServiceDevelopment
+                            FileName: images.json
+                        InputArtifacts:
+                            - Name: DevelopmentBuildOutput
+                        RunOrder: 1
+                - Name: CanaryBuild
+                  Actions:
+                      - Name: BuildApproval
+                        ActionTypeId:
+                            Category: Approval
+                            Owner: AWS
+                            Version: 1
+                            Provider: Manual
+                        Configuration:
+                            NotificationArn: !Ref ApprovalARN
+                            ExternalEntityLink: !Sub 'http://${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+                            CustomData: !Sub '{"message":"${DeployToCanaryMsg}","topicARN":"${PMSNSArn}"}'
+                        RunOrder: 1
+                      - Name: CanaryBuild
+                        ActionTypeId:
+                            Category: Build
+                            Owner: AWS
+                            Version: 1
+                            Provider: CodeBuild
+                        Configuration:
+                            ProjectName: !Ref CodeBuildProjectCanary
+                        InputArtifacts:
+                            - Name: App
+                        OutputArtifacts:
+                            - Name: CanaryBuildOutput
+                        RunOrder: 2
+                      - Name: CanaryDeploy
+                        ActionTypeId:
+                            Category: Deploy
+                            Owner: AWS
+                            Version: 1
+                            Provider: ECS
+                        Configuration:
+                            ClusterName: !Ref Cluster
+                            ServiceName: !Ref FargateServiceCanary
+                            FileName: images.json
+                        InputArtifacts:
+                            - Name: CanaryBuildOutput
+                        RunOrder: 3
+    AmazonCloudWatchEventRole:
+        Type: AWS::IAM::Role
+        DependsOn: [Pipeline]
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                    -
+                        Effect: Allow
+                        Principal:
+                            Service:
+                                - events.amazonaws.com
+                        Action: sts:AssumeRole
+            Path: /
+            Policies:
+                -
+                    PolicyName: !Sub ${ContainerName}-prod-pipeline-policy
+                    PolicyDocument:
+                        Version: 2012-10-17
+                        Statement:
+                            -
+                                Effect: Allow
+                                Action: codepipeline:StartPipelineExecution
+                                Resource: !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref Pipeline ] ] 
+    AmazonCloudWatchEventRule:
+        Type: AWS::Events::Rule
+        DependsOn: [Pipeline,AmazonCloudWatchEventRole]
+        Properties:
+            EventPattern:
+                source:
+                    - aws.codecommit
+                detail-type:
+                    - 'CodeCommit Repository State Change'
+                resources:
+                    - !Join [ '', [ 'arn:aws:codecommit:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref ContainerName ] ]
+                detail:
+                    event:
+                        - referenceCreated
+                        - referenceUpdated
+                    referenceType:
+                        - branch
+                    referenceName:
+                        - master
+            Targets:
+                -
+                    Arn: 
+                        !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref Pipeline ] ]
+                    RoleArn: !GetAtt AmazonCloudWatchEventRole.Arn
+                    Id: !Sub ${ContainerName}-codepipeline-Pipeline
+    Pipeline:
+        Type: AWS::CodePipeline::Pipeline
+        DependsOn: CodeCommitRepo
+        Properties:
+            RoleArn: !GetAtt CodePipelineServiceRole.Arn
+            ArtifactStore:
+                Type: S3
+                Location: !Ref ArtifactBucketName
+            Stages:
+                - Name: Source
+                  Actions:
+                      - Name: App
+                        ActionTypeId:
+                            Category: Source
+                            Owner: AWS
+                            Version: 1
+                            Provider: CodeCommit
+                        Configuration:
+                            BranchName: "master"
+                            RepositoryName: !GetAtt CodeCommitRepo.Name
+                            PollForSourceChanges: false
+                        OutputArtifacts:
+                            - Name: App
+                        RunOrder: 1
+                # - Name: CanaryBuild
+                #   Actions:
+                #       - Name: BuildApproval
+                #         ActionTypeId:
+                #             Category: Approval
+                #             Owner: AWS
+                #             Version: 1
+                #             Provider: Manual
+                #         Configuration:
+                #             NotificationArn: !Ref ApprovalARN
+                #             ExternalEntityLink: !Sub 'http://${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+                #             CustomData: !Sub '{"message":"${DeployToCanaryMsg}","topicARN":"${DevSNSArn}"}'
+                #         RunOrder: 1
+                #       - Name: CanaryBuild
+                #         ActionTypeId:
+                #             Category: Build
+                #             Owner: AWS
+                #             Version: 1
+                #             Provider: CodeBuild
+                #         Configuration:
+                #             ProjectName: !Ref CodeBuildProjectCanary
+                #         InputArtifacts:
+                #             - Name: App
+                #         OutputArtifacts:
+                #             - Name: CanaryBuildOutput
+                #         RunOrder: 2
+                #       - Name: CanaryDeploy
+                #         ActionTypeId:
+                #             Category: Deploy
+                #             Owner: AWS
+                #             Version: 1
+                #             Provider: ECS
+                #         Configuration:
+                #             ClusterName: !Ref Cluster
+                #             ServiceName: !Ref FargateServiceCanary
+                #             FileName: images.json
+                #         InputArtifacts:
+                #             - Name: CanaryBuildOutput
+                #         RunOrder: 3
+                #       - Name: StagingApproval1
+                #         ActionTypeId:
+                #             Category: Approval
+                #             Owner: AWS
+                #             Version: 1
+                #             Provider: Manual
+                #         Configuration:
+                #             NotificationArn: !Ref ApprovalARN
+                #             ExternalEntityLink: !Sub 'http://${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+                #             CustomData: !Sub '{"message":"${DeployToStagingMsg}","topicARN":"${DevSNSArn}"}'
+                #         RunOrder: 4
+                #       - Name: StagingApproval2
+                #         ActionTypeId:
+                #             Category: Approval
+                #             Owner: AWS
+                #             Version: 1
+                #             Provider: Manual
+                #         Configuration:
+                #             NotificationArn: !Ref ApprovalARN
+                #             ExternalEntityLink: !Sub 'http://${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+                #             CustomData: !Sub '{"message":"${DeployToStagingMsg}","topicARN":"${QASNSArn}"}'
+                #         RunOrder: 4
+                #       - Name: StagingApproval3
+                #         ActionTypeId:
+                #             Category: Approval
+                #             Owner: AWS
+                #             Version: 1
+                #             Provider: Manual
+                #         Configuration:
+                #             NotificationArn: !Ref ApprovalARN
+                #             ExternalEntityLink: !Sub 'http://${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+                #             CustomData: !Sub '{"message":"${DeployToStagingMsg}","topicARN":"${PMSNSArn}"}'
+                #         RunOrder: 4
+                - Name: StagingBuild
+                  Actions:
+                      - Name: StagingBuild
+                        ActionTypeId:
+                            Category: Build
+                            Owner: AWS
+                            Version: 1
+                            Provider: CodeBuild
+                        Configuration:
+                            ProjectName: !Ref CodeBuildProjectStaging
+                        InputArtifacts:
+                            - Name: App
+                        OutputArtifacts:
+                            - Name: StagingBuildOutput
+                        RunOrder: 1
+                      - Name: StagingDeploy
+                        ActionTypeId:
+                            Category: Deploy
+                            Owner: AWS
+                            Version: 1
+                            Provider: ECS
+                        Configuration:
+                            ClusterName: !Ref Cluster
+                            ServiceName: !Ref FargateServiceStaging
+                            FileName: images.json
+                        InputArtifacts:
+                            - Name: StagingBuildOutput
+                        RunOrder: 2
+                      - Name: ProductionApproval1
+                        ActionTypeId:
+                            Category: Approval
+                            Owner: AWS
+                            Version: 1
+                            Provider: Manual
+                        Configuration:
+                            NotificationArn: !Ref ApprovalARN
+                            ExternalEntityLink: !Sub 'http://${SubDomain}.staging.${ProjectSubDomain}.${Domain}'
+                            CustomData: !Sub '{"message":"${DeployToProdMsg}","topicARN":"${QASNSArn}"}'
+                        RunOrder: 3
+                      - Name: ProductionApproval2
+                        ActionTypeId:
+                            Category: Approval
+                            Owner: AWS
+                            Version: 1
+                            Provider: Manual
+                        Configuration:
+                            NotificationArn: !Ref ApprovalARN
+                            ExternalEntityLink: !Sub 'http://${SubDomain}.staging.${ProjectSubDomain}.${Domain}'
+                            CustomData: !Sub '{"message":"${DeployToProdMsg}","topicARN":"${PMSNSArn}"}'
+                        RunOrder: 3
+                      - Name: ProductionApproval3
+                        ActionTypeId:
+                            Category: Approval
+                            Owner: AWS
+                            Version: 1
+                            Provider: Manual
+                        Configuration:
+                            NotificationArn: !Ref ApprovalARN
+                            ExternalEntityLink: !Sub 'http://${SubDomain}.staging.${ProjectSubDomain}.${Domain}'
+                            CustomData: !Sub '{"message":"${DeployToProdMsg}","topicARN":"${InfraSNSArn}"}'
+                        RunOrder: 3
+                - Name: ProductionBuild
+                  Actions:
+                      - Name: ProductionBuild
+                        ActionTypeId:
+                            Category: Build
+                            Owner: AWS
+                            Version: 1
+                            Provider: CodeBuild
+                        Configuration:
+                            ProjectName: !Ref CodeBuildProject
+                        InputArtifacts:
+                            - Name: App
+                        OutputArtifacts:
+                            - Name: ProductionBuildOutput
+                        RunOrder: 1
+                - Name: ProductionDeploy
+                  Actions:
+                      - Name: ProductionDeploy
+                        ActionTypeId:
+                            Category: Deploy
+                            Owner: AWS
+                            Version: 1
+                            Provider: ECS
+                        Configuration:
+                            ClusterName: !Ref Cluster
+                            ServiceName: !Ref FargateServiceProduction
+                            FileName: images.json
+                        InputArtifacts:
+                            - Name: ProductionBuildOutput
+                        RunOrder: 1
+    TaskDefinitionDevelopment:
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+            Family: !Ref FamilyDevelopment
+            RequiresCompatibilities: ["FARGATE"]
+            Memory: !Ref Memory
+            Cpu: !Ref Cpu
+            NetworkMode: "awsvpc"
+            ExecutionRoleArn: !Ref TaskExecutionRole
+            ContainerDefinitions:
+                - Name: !Ref FamilyDevelopment
+                  Image: {"Fn::Join":["",[{"Ref":"AWS::AccountId"},".dkr.ecr.ap-southeast-1.amazonaws.com/",{"Ref":"RepositoryDevelopment"},":","latest"]]}
+                  Essential: true
+                  Cpu: !Ref Cpu
+                  PortMappings:
+                      - ContainerPort: 80
+                  LogConfiguration:
+                      LogDriver: awslogs
+                      Options:
+                          awslogs-region: !Ref AWS::Region
+                          awslogs-group: !Ref LogGroup
+                          awslogs-stream-prefix: !Ref AWS::StackName
+                  HealthCheck:
+                      Retries: 3
+                      Command: 
+                          ["CMD-SHELL","curl -f http://localhost/   || exit 1"]
+                      Timeout: 60
+                      Interval: 300
+                      StartPeriod: 300
+    AutoscalingRoleDevelopment:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Statement:
+                    - Effect: Allow
+                      Principal:
+                            Service: [ecs.application-autoscaling.amazonaws.com]
+                      Action: ['sts:AssumeRole']
+            Path: /
+            Policies:
+                - PolicyName: !Join ["-",[!Ref FamilyDevelopment,"service-autoscaling-role"]]
+                  PolicyDocument:
+                        Statement:
+                            - Effect: Allow
+                              Action: ['application-autoscaling:*', 'cloudwatch:DescribeAlarms', 'cloudwatch:PutMetricAlarm','ecs:DescribeServices', 'ecs:UpdateService']
+                              Resource: '*'
+    ServiceScalingTargetDevelopment:
+        Type: AWS::ApplicationAutoScaling::ScalableTarget
+        DependsOn: FargateServiceDevelopment
+        Properties:
+            MaxCapacity: 1
+            MinCapacity: 1
+            ResourceId: !Join ['', [service/, !Ref 'Cluster', /, !GetAtt FargateServiceDevelopment.Name]]
+            RoleARN: !GetAtt [AutoscalingRoleDevelopment, Arn]
+            ScalableDimension: ecs:service:DesiredCount
+            ServiceNamespace: ecs
+
+    ServiceScalingPolicyDevelopment:
+        Type: AWS::ApplicationAutoScaling::ScalingPolicy
+        Properties:
+            PolicyName: !Join ["-",[!Ref FamilyDevelopment,"service-autoscaling-policy"]]
+            PolicyType: StepScaling
+            ScalingTargetId: !Ref 'ServiceScalingTargetDevelopment'
+            StepScalingPolicyConfiguration:
+                AdjustmentType: PercentChangeInCapacity
+                Cooldown: 60
+                MetricAggregationType: Average
+                StepAdjustments:
+                - MetricIntervalLowerBound: 0
+                  ScalingAdjustment: 200  
+
+    RAMAlarmScaleUpDevelopment:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '70'
+            AlarmDescription: Alarm if our RAM is 70 percent or more
+            Period: '60'
+            AlarmActions: [!Ref 'ServiceScalingPolicyDevelopment']
+            Namespace: AWS/ECS
+            ComparisonOperator: GreaterThanThreshold
+            MetricName: MemoryUtilization
+            Dimensions:
+              - Name: ServiceName
+                Value: !GetAtt FargateServiceDevelopment.Name
+              - Name: ClusterName
+                Value: !Ref Cluster
+
+    CPUAlarmScaleUpDevelopment:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '60'
+            AlarmDescription: Alarm if our CPU is 60 percent or more
+            Period: '60'
+            AlarmActions: [!Ref 'ServiceScalingPolicyDevelopment']
+            Namespace: AWS/ECS
+            ComparisonOperator: GreaterThanThreshold
+            MetricName: CPUUtilization
+            Dimensions:
+              - Name: ServiceName
+                Value: !GetAtt FargateServiceDevelopment.Name
+              - Name: ClusterName
+                Value: !Ref Cluster
+
+    TaskDefinitionCanary:
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+            Family: !Ref FamilyCanary
+            RequiresCompatibilities: ["FARGATE"]
+            Memory: !Ref Memory
+            Cpu: !Ref Cpu
+            NetworkMode: "awsvpc"
+            ExecutionRoleArn: !Ref TaskExecutionRole
+            ContainerDefinitions:
+                - Name: !Ref FamilyCanary
+                  Image: {"Fn::Join":["",[{"Ref":"AWS::AccountId"},".dkr.ecr.ap-southeast-1.amazonaws.com/",{"Ref":"RepositoryCanary"},":","latest"]]}
+                  Essential: true
+                  Cpu: !Ref Cpu
+                  PortMappings:
+                      - ContainerPort: 80
+                  LogConfiguration:
+                        LogDriver: awslogs
+                        Options:
+                            awslogs-region: !Ref AWS::Region
+                            awslogs-group: !Ref LogGroup
+                            awslogs-stream-prefix: !Ref AWS::StackName
+                  HealthCheck:
+                      Retries: 3
+                      Command: 
+                          ["CMD-SHELL","curl -f http://localhost/   || exit 1"]
+                      Timeout: 60
+                      Interval: 300
+                      StartPeriod: 300
+    
+    AutoscalingRoleCanary:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Statement:
+                    - Effect: Allow
+                      Principal:
+                            Service: [ecs.application-autoscaling.amazonaws.com]
+                      Action: ['sts:AssumeRole']
+            Path: /
+            Policies:
+                - PolicyName: !Join ["-",[!Ref FamilyCanary,"service-autoscaling-role"]]
+                  PolicyDocument:
+                        Statement:
+                            - Effect: Allow
+                              Action: ['application-autoscaling:*', 'cloudwatch:DescribeAlarms', 'cloudwatch:PutMetricAlarm','ecs:DescribeServices', 'ecs:UpdateService']
+                              Resource: '*'
+    ServiceScalingTargetCanary:
+        Type: AWS::ApplicationAutoScaling::ScalableTarget
+        DependsOn: FargateServiceCanary
+        Properties:
+            MaxCapacity: 1
+            MinCapacity: 1
+            ResourceId: !Join ['', [service/, !Ref 'Cluster', /, !GetAtt FargateServiceCanary.Name]]
+            RoleARN: !GetAtt [AutoscalingRoleCanary, Arn]
+            ScalableDimension: ecs:service:DesiredCount
+            ServiceNamespace: ecs
+
+    ServiceScalingPolicyCanary:
+        Type: AWS::ApplicationAutoScaling::ScalingPolicy
+        Properties:
+            PolicyName: !Join ["-",[!Ref FamilyCanary,"service-autoscaling-policy"]]
+            PolicyType: StepScaling
+            ScalingTargetId: !Ref 'ServiceScalingTargetCanary'
+            StepScalingPolicyConfiguration:
+                AdjustmentType: PercentChangeInCapacity
+                Cooldown: 60
+                MetricAggregationType: Average
+                StepAdjustments:
+                - MetricIntervalLowerBound: 0
+                  ScalingAdjustment: 200  
+
+    RAMAlarmScaleUpCanary:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '70'
+            AlarmDescription: Alarm if our RAM is 70 percent or more
+            Period: '60'
+            AlarmActions: [!Ref 'ServiceScalingPolicyCanary']
+            Namespace: AWS/ECS
+            ComparisonOperator: GreaterThanThreshold
+            MetricName: MemoryUtilization
+            Dimensions:
+              - Name: ServiceName
+                Value: !GetAtt FargateServiceCanary.Name
+              - Name: ClusterName
+                Value: !Ref Cluster
+    CPUAlarmScaleUpCanary:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '60'
+            AlarmDescription: Alarm if our CPU is 60 percent or more
+            Period: '60'
+            AlarmActions: [!Ref 'ServiceScalingPolicyCanary']
+            Namespace: AWS/ECS
+            ComparisonOperator: GreaterThanThreshold
+            MetricName: CPUUtilization
+            Dimensions:
+              - Name: ServiceName
+                Value: !GetAtt FargateServiceCanary.Name
+              - Name: ClusterName
+                Value: !Ref Cluster
+
+    TaskDefinitionStaging:
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+            Family: !Ref FamilyStaging
+            RequiresCompatibilities: ["FARGATE"]
+            Memory: !Ref Memory
+            Cpu: !Ref Cpu
+            NetworkMode: "awsvpc"
+            ExecutionRoleArn: !Ref TaskExecutionRole
+            ContainerDefinitions:
+                - Name: !Ref FamilyStaging
+                  Image: {"Fn::Join":["",[{"Ref":"AWS::AccountId"},".dkr.ecr.ap-southeast-1.amazonaws.com/",{"Ref":"RepositoryStaging"},":","latest"]]}
+                  Essential: true
+                  Cpu: !Ref Cpu
+                  PortMappings:
+                      - ContainerPort: 80
+                  LogConfiguration:
+                        LogDriver: awslogs
+                        Options:
+                            awslogs-region: !Ref AWS::Region
+                            awslogs-group: !Ref LogGroup
+                            awslogs-stream-prefix: !Ref AWS::StackName
+                  HealthCheck:
+                      Retries: 3
+                      Command: 
+                          ["CMD-SHELL","curl -f http://localhost/   || exit 1"]
+                      Timeout: 60
+                      Interval: 300
+                      StartPeriod: 300
+    AutoscalingRoleStaging:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Statement:
+                    - Effect: Allow
+                      Principal:
+                            Service: [ecs.application-autoscaling.amazonaws.com]
+                      Action: ['sts:AssumeRole']
+            Path: /
+            Policies:
+                - PolicyName: !Join ["-",[!Ref FamilyStaging,"service-autoscaling-role"]]
+                  PolicyDocument:
+                        Statement:
+                            - Effect: Allow
+                              Action: ['application-autoscaling:*', 'cloudwatch:DescribeAlarms', 'cloudwatch:PutMetricAlarm','ecs:DescribeServices', 'ecs:UpdateService']
+                              Resource: '*'
+    ServiceScalingTargetStaging:
+        Type: AWS::ApplicationAutoScaling::ScalableTarget
+        DependsOn: FargateServiceStaging
+        Properties:
+            MaxCapacity: !Ref MaxCapacity
+            MinCapacity: 1
+            ResourceId: !Join ['', [service/, !Ref 'Cluster', /, !GetAtt FargateServiceStaging.Name]]
+            RoleARN: !GetAtt [AutoscalingRoleStaging, Arn]
+            ScalableDimension: ecs:service:DesiredCount
+            ServiceNamespace: ecs
+
+    ServiceScalingPolicyStaging:
+        Type: AWS::ApplicationAutoScaling::ScalingPolicy
+        Properties:
+            PolicyName: !Join ["-",[!Ref FamilyStaging,"service-autoscaling-policy"]]
+            PolicyType: StepScaling
+            ScalingTargetId: !Ref 'ServiceScalingTargetStaging'
+            StepScalingPolicyConfiguration:
+                AdjustmentType: PercentChangeInCapacity
+                Cooldown: 60
+                MetricAggregationType: Average
+                StepAdjustments:
+                - MetricIntervalLowerBound: 0
+                  ScalingAdjustment: 200
+
+    NegativeServiceScalingPolicyStaging:
+        Type: AWS::ApplicationAutoScaling::ScalingPolicy
+        Properties:
+            PolicyName: !Join ["-",[!Ref FamilyStaging,"service-scale-in-policy"]]
+            PolicyType: StepScaling
+            ScalingTargetId: !Ref 'ServiceScalingTargetStaging'
+            StepScalingPolicyConfiguration:
+                AdjustmentType: ChangeInCapacity
+                Cooldown: 60
+                MetricAggregationType: Average
+                StepAdjustments:
+                - MetricIntervalLowerBound: -10
+                  MetricIntervalUpperBound: 0
+                  ScalingAdjustment: 0
+                - MetricIntervalUpperBound: -10
+                  ScalingAdjustment: -1
+
+    RAMAlarmScaleUpStaging:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '40'
+            AlarmDescription: Alarm if our RAM is 70 percent or more
+            Period: '60'
+            AlarmActions: [!Ref 'ServiceScalingPolicyStaging']
+            OKActions: [!Ref 'NegativeServiceScalingPolicyStaging' ]
+            Namespace: AWS/ECS
+            ComparisonOperator: GreaterThanThreshold
+            MetricName: MemoryUtilization
+            Dimensions:
+              - Name: ServiceName
+                Value: !GetAtt FargateServiceStaging.Name
+              - Name: ClusterName
+                Value: !Ref Cluster
+    CPUAlarmScaleUpStaging:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '40'
+            AlarmDescription: Alarm if our CPU is 60 percent or more
+            Period: '60'
+            AlarmActions: [!Ref 'ServiceScalingPolicyStaging']
+            OKActions: [!Ref 'NegativeServiceScalingPolicyStaging' ]
+            Namespace: AWS/ECS
+            ComparisonOperator: GreaterThanThreshold
+            MetricName: CPUUtilization
+            Dimensions:
+              - Name: ServiceName
+                Value: !GetAtt FargateServiceStaging.Name
+              - Name: ClusterName
+                Value: !Ref Cluster
+
+
+    AutoscalingRoleProduction:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Statement:
+                    - Effect: Allow
+                      Principal:
+                            Service: [ecs.application-autoscaling.amazonaws.com]
+                      Action: ['sts:AssumeRole']
+            Path: /
+            Policies:
+                - PolicyName: !Join ["-",[!Ref FamilyProduction,"service-autoscaling-role"]]
+                  PolicyDocument:
+                        Statement:
+                            - Effect: Allow
+                              Action: ['application-autoscaling:*', 'cloudwatch:DescribeAlarms', 'cloudwatch:PutMetricAlarm','ecs:DescribeServices', 'ecs:UpdateService']
+                              Resource: '*'
+    ServiceScalingTargetProduction:
+        Type: AWS::ApplicationAutoScaling::ScalableTarget
+        DependsOn: FargateServiceProduction
+        Properties:
+            MaxCapacity: !Ref MaxCapacity
+            MinCapacity: !Ref MinCapacity
+            ResourceId: !Join ['', [service/, !Ref 'Cluster', /, !GetAtt FargateServiceProduction.Name]]
+            RoleARN: !GetAtt [AutoscalingRoleProduction, Arn]
+            ScalableDimension: ecs:service:DesiredCount
+            ServiceNamespace: ecs
+
+    ServiceScalingPolicyProduction:
+        Type: AWS::ApplicationAutoScaling::ScalingPolicy
+        Properties:
+            PolicyName: !Join ["-",[!Ref FamilyProduction,"service-autoscaling-policy"]]
+            PolicyType: StepScaling
+            ScalingTargetId: !Ref 'ServiceScalingTargetProduction'
+            StepScalingPolicyConfiguration:
+                AdjustmentType: PercentChangeInCapacity
+                Cooldown: 60
+                MetricAggregationType: Average
+                StepAdjustments:
+                - MetricIntervalLowerBound: 0
+                  ScalingAdjustment: 200
+
+    NegativeServiceScalingPolicyProduction:
+        Type: AWS::ApplicationAutoScaling::ScalingPolicy
+        Properties:
+            PolicyName: !Join ["-",[!Ref FamilyProduction,"service-scale-in-policy"]]
+            PolicyType: StepScaling
+            ScalingTargetId: !Ref 'ServiceScalingTargetProduction'
+            StepScalingPolicyConfiguration:
+                AdjustmentType: ChangeInCapacity
+                Cooldown: 60
+                MetricAggregationType: Average
+                StepAdjustments:
+                - MetricIntervalLowerBound: -10
+                  MetricIntervalUpperBound: 0
+                  ScalingAdjustment: 0
+                - MetricIntervalUpperBound: -10
+                  ScalingAdjustment: -1
+
+    RAMAlarmScaleUpProduction:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '70'
+            AlarmDescription: Alarm if our RAM is 70 percent or more
+            Period: '60'
+            OKActions: [ !Ref NegativeServiceScalingPolicyProduction ]
+            AlarmActions: [!Ref ServiceScalingPolicyProduction]
+            Namespace: AWS/ECS
+            ComparisonOperator: GreaterThanThreshold
+            MetricName: MemoryUtilization
+            Dimensions:
+              - Name: ServiceName
+                Value: !GetAtt FargateServiceProduction.Name
+              - Name: ClusterName
+                Value: !Ref Cluster
+    CPUAlarmScaleUpProduction:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '60'
+            AlarmDescription: Alarm if our CPU is 60 percent or more
+            Period: '60'
+            OKActions: [ !Ref NegativeServiceScalingPolicyProduction ]
+            AlarmActions: [!Ref 'ServiceScalingPolicyProduction']
+            Namespace: AWS/ECS
+            ComparisonOperator: GreaterThanThreshold
+            MetricName: CPUUtilization
+            Dimensions:
+              - Name: ServiceName
+                Value: !GetAtt FargateServiceProduction.Name
+              - Name: ClusterName
+                Value: !Ref Cluster
+
+    TaskDefinitionProduction:
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+            Family: !Ref FamilyProduction
+            RequiresCompatibilities: ["FARGATE"]
+            Memory: !Ref Memory
+            Cpu: !Ref Cpu
+            NetworkMode: "awsvpc"
+            ExecutionRoleArn: !Ref TaskExecutionRole
+            ContainerDefinitions:
+                - Name: !Ref FamilyProduction
+                  Image: {"Fn::Join":["",[{"Ref":"AWS::AccountId"},".dkr.ecr.ap-southeast-1.amazonaws.com/",{"Ref":"RepositoryProduction"},":","latest"]]}
+                  Essential: true
+                  Cpu: !Ref Cpu
+                  PortMappings:
+                      - ContainerPort: 80
+                  LogConfiguration:
+                      LogDriver: awslogs
+                      Options:
+                          awslogs-region: !Ref AWS::Region
+                          awslogs-group: !Ref LogGroup
+                          awslogs-stream-prefix: !Ref AWS::StackName
+                  HealthCheck:
+                      Retries: 3
+                      Command: 
+                          ["CMD-SHELL","curl -f http://localhost/   || exit 1"]
+                      Timeout: 60
+                      Interval: 300
+                      StartPeriod: 300
+
+
+    # HealthCheckDevelopment: 
+    #     Type: "AWS::Route53::HealthCheck"
+    #     Properties: 
+    #         HealthCheckConfig: 
+    #             Port: "443"
+    #             Type: "HTTPS"
+    #             ResourcePath: "/"
+    #             FullyQualifiedDomainName: !Sub '${SubDomain}.dev.${ProjectSubDomain}.${Domain}'
+    #             RequestInterval: 30
+    #             FailureThreshold: 3
+    #         HealthCheckTags: 
+    #             - Key: "Name"
+    #               Value: !Sub Health Check for ${SubDomain} Development Service
+    #             - Key: "Project"
+    #               Value: !Ref ContainerName
+    #             - Key: "Environment"
+    #               Value: Development
+    #             - Key: "Contact"
+    #               Value: infra@globedv.com
+    # HealthCheckCanary: 
+    #     Type: "AWS::Route53::HealthCheck"
+    #     Properties: 
+    #         HealthCheckConfig: 
+    #             Port: "443"
+    #             Type: "HTTPS"
+    #             ResourcePath: "/"
+    #             FullyQualifiedDomainName: !Sub '${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+    #             RequestInterval: 30
+    #             FailureThreshold: 3
+    #         HealthCheckTags: 
+    #             - Key: "Name"
+    #               Value: !Sub Health Check for ${SubDomain} Canary Service
+    #             - Key: "Project"
+    #               Value: !Ref ContainerName
+    #             - Key: "Environment"
+    #               Value: Canary
+    #             - Key: "Contact"
+    #               Value: infra@globedv.com
+    # HealthCheckStaging: 
+    #     Type: "AWS::Route53::HealthCheck"
+    #     Properties: 
+    #         HealthCheckConfig: 
+    #             Port: "443"
+    #             Type: "HTTPS"
+    #             ResourcePath: "/"
+    #             FullyQualifiedDomainName: !Sub '${SubDomain}.staging.${ProjectSubDomain}.${Domain}'
+    #             RequestInterval: 30
+    #             FailureThreshold: 3
+    #         HealthCheckTags: 
+    #             - Key: "Name"
+    #               Value: !Sub Health Check for ${SubDomain} Staging Service
+    #             - Key: "Project"
+    #               Value: !Ref ContainerName
+    #             - Key: "Environment"
+    #               Value: Staging
+    #             - Key: "Contact"
+    #               Value: infra@globedv.com
+    HealthCheckProduction: 
+        Type: "AWS::Route53::HealthCheck"
+        Properties: 
+            HealthCheckConfig: 
+                Port: "443"
+                Type: "HTTPS"
+                ResourcePath: "/"
+                FullyQualifiedDomainName: !Sub '${SubDomain}.${ProjectSubDomain}.${Domain}'
+                RequestInterval: 30
+                FailureThreshold: 3
+            HealthCheckTags: 
+                - Key: "Name"
+                  Value: !Sub Health Check for ${SubDomain} Production Service
+                - Key: "Project"
+                  Value: !Ref ContainerName
+                - Key: "Environment"
+                  Value: Production
+                - Key: "Contact"
+                  Value: infra@globedv.com
+Outputs:
+    ClusterName:
+        Value: !Ref Cluster
+    ContainerName:
+        Value: !Ref ContainerName
+    TargetGroupDevelopment:
+        Value: !Ref TargetGroupDevelopment
+    TargetGroupProduction:
+        Value: !Ref TargetGroupProduction
+    TargetGroupCanary:
+        Value: !Ref TargetGroupCanary
+    TargetGroupStaging:
+        Value: !Ref TargetGroupStaging
+    ServiceUrl:
+        Description: URL of the load balancer for the sample service.
+        Value: !Sub 'http://${DNSName}/${ContainerName}'
+    DevURL:
+        Description: URL of the Development Service
+        Value: !Sub '${SubDomain}.dev.${ProjectSubDomain}.${Domain}'
+    CanaryURL:
+        Description: URL of the Development Service
+        Value: !Sub '${SubDomain}.canary.${ProjectSubDomain}.${Domain}'
+    StagingURL:
+        Description: URL of the Development Service
+        Value: !Sub '${SubDomain}.staging.${ProjectSubDomain}.${Domain}'
+    ProductionURL:
+        Description: URL of the Development Service
+        Value: !Sub '${SubDomain}.${ProjectSubDomain}.${Domain}'
+    VpcId:
+        Value: !Ref VpcId
+    CodeCommitRepo:
+        Value: !GetAtt CodeCommitRepo.CloneUrlHttp
+    PipelineUrl:
+        Value: !Sub 'https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}'
+    DevQueue:
+        Value: !Ref DevQueue
+    CanaryQueue:
+        Value: !Ref CanaryQueue
+    StagingQueue:
+        Value: !Ref StagingQueue
+    ProductionQueue:
+        Value: !Ref ProductionQueue

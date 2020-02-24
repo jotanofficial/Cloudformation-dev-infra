@@ -1,0 +1,229 @@
+Description: >
+    Creates a complete ECS Fargate Architecture, Stackname is the Project Name
+Parameters:
+    VpcId: 
+        Type: String
+        Description: GRewards-Prod-24
+        Default: vpc-f3185094
+    MinCapacity:
+        Type: Number
+        Description: Minimum number of services that can be hosted
+        Default: 1
+    MaxCapacity:
+        Type: Number
+        Description: Maximum number of services that can be hosted
+        Default: 10
+    Memory: 
+        Type: Number
+        Description: RAM Allocated for each Service. (256 Cpu can cater 512 RAM.)
+        Default: 1024
+    Cpu:
+        Type: Number
+        Description: CPU Allocated for each Service. (256 Cpu can cater 512 RAM.)
+        Default: 512
+    DesiredCount:
+        Type: Number
+        Default: 0
+        Description: Desired Number of Tasks running per service.
+    HostedZoneName:
+        Type: String
+        Default: globedv.com.
+    ApprovalARN:
+        Type: String
+        Default: arn:aws:sns:ap-southeast-1:518132289279:CICD-Lambda-MA
+    DeployToDevMsg:
+        Type: String
+        Default: "The DEVELOPMENT SOURCE CODE has been updated, do you want to Deploy to the DEVELOPMENT Environment?"
+    DeployToCanaryMsg:
+        Type: String
+        Default: "The MASTER CODE has been updated, do you want to push it to CANARY?"
+    DeployToStagingMsg:
+        Type: String
+        Default: "Canary is Ready. Kindly do a FUNCTIONAL TESTING then APPROVE or REJECT its journey to the STAGING Environment."
+    DeployToProdMsg:
+        Type: String
+        Default: "Staging is Ready. Kindly do a PERFORMANCE TESTING then APPROVE or REJECT its journey to the PRODUCTION Environment."
+    ProjectSubDomain: 
+        Description: Just the subdomain string. (project) in project.globedv.com
+        Type: String
+        Default: "services.globerewards"
+    Domain: 
+        Description: Domain of your containers. CREATE THIS MANUALLY THEN POINT IT TO THE ALB DNS.
+        Type: String
+        Default: "globedv.com"
+    Contact: 
+        Description: Who created this stack?
+        Type: String
+        Default: "infra@globedv.com"
+    ClusterName: 
+        Description: Clustername. alpha-numeric and hyphens only.
+        Type: String
+        Default: ecs-cluster-name
+    LogGroupName: 
+        Description: Log Group Name [\.\-_/#A-Za-z0-9]+ only.
+        Type: String
+        Default: ecs-log-group
+    CertificateArn:
+        Type: String
+        Default: arn:aws:acm:ap-southeast-1:518132289279:certificate/a1af971b-a5f9-4229-955b-a44d4186e32d
+Resources:
+    Cluster:
+        Type: AWS::ECS::Cluster
+        Properties:
+            ClusterName: !Ref ClusterName
+    TaskExecutionRole:
+        Type: AWS::IAM::Role
+        Properties:
+            Path: /
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                    - Action: sts:AssumeRole
+                      Effect: Allow
+                      Principal:
+                            Service: ecs-tasks.amazonaws.com
+            ManagedPolicyArns:
+                - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+    LogGroup:
+        Type: AWS::Logs::LogGroup
+        Properties:
+            LogGroupName: !Ref LogGroupName
+    ArtifactBucket:
+        Type: AWS::S3::Bucket
+        DeletionPolicy: Retain
+        Properties:
+            Tags: 
+                - Key: Project
+                  Value: !Ref ClusterName
+                - Key: Environment
+                  Value: "Build"
+                - Key: Contact
+                  Value: !Ref Contact  
+    VPC:
+        Description: "usage !GetAtt VPC.Outputs.VPC"
+        Type: AWS::CloudFormation::Stack
+        Properties:
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/GREWARDS/cf-sandbox-vpc-alb-secgroup.yml"
+            Parameters:
+                EnvironmentName: !Ref AWS::StackName
+                Contact: !Ref 'Contact'
+                HostedZoneName: !Ref HostedZoneName
+                ProjectSubDomain: !Ref ProjectSubDomain
+                CertificateArn: !Ref CertificateArn
+                VpcId: !Ref VpcId
+
+    BlastService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        DependsOn: [ArtifactBucket,Cluster,TaskExecutionRole]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/GREWARDS/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["blast-service","development"]]
+                FamilyCanary: !Join ["-",["blast-service","canary"]]
+                FamilyStaging: !Join ["-",["blast-service","staging"]]
+                FamilyProduction: !Join ["-",["blast-service","production"]]
+                SubDomain: "blast-service"
+                DevSNSName: "blast-service-Dev"
+                QASNSName: "blast-service-QA"
+                PMSNSName: "blast-service-PM"
+                InfraSNSName: "blast-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: blast-service
+                PolicyName: blast-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 2
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+
+    PythonSnsService: 
+        Description: "Usage !GetAtt Container1.Outputs.CodeCommitRepo"
+        DependsOn: [ArtifactBucket,Cluster,TaskExecutionRole]  
+        Type: AWS::CloudFormation::Stack 
+        Properties: 
+            TemplateURL: "https://s3-ap-southeast-1.amazonaws.com/cicd-s3.globedv.com/INFRA-CF/GREWARDS/cf-sandbox-ecs-container.yaml"
+            Parameters: 
+                Cluster: !Ref Cluster
+                ProjectSubDomain: !Ref ProjectSubDomain
+                HostedZoneName: !Ref HostedZoneName
+                ClusterArn: !GetAtt Cluster.Arn
+                LogGroup: !Ref LogGroup
+                FamilyDevelopment: !Join ["-",["python-sns-service","development"]]
+                FamilyCanary: !Join ["-",["python-sns-service","canary"]]
+                FamilyStaging: !Join ["-",["python-sns-service","staging"]]
+                FamilyProduction: !Join ["-",["python-sns-service","production"]]
+                SubDomain: "python-sns-service"
+                DevSNSName: "python-sns-service-Dev"
+                QASNSName: "python-sns-service-QA"
+                PMSNSName: "python-sns-service-PM"
+                InfraSNSName: "python-sns-service-Infra"
+                Domain: !Ref Domain
+                ContainerName: python-sns-service
+                PolicyName: python-sns-service
+                CertificateArn: !Ref CertificateArn
+                VpcId: !GetAtt VPC.Outputs.VPC
+                LoadBalancerListenerHTTP: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
+                LoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.LoadBalancerListenerHTTPS
+                DevLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTP
+                DevLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.DevLoadBalancerListenerHTTPS
+                CanaryLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTP
+                CanaryLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.CanaryLoadBalancerListenerHTTPS
+                StagingLoadBalancerListenerHTTP: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTP
+                StagingLoadBalancerListenerHTTPS: !GetAtt VPC.Outputs.StagingLoadBalancerListenerHTTPS
+                ArtifactBucketName: !Ref ArtifactBucket
+                PublicSubnet1: !GetAtt VPC.Outputs.PublicSubnet1
+                PublicSubnet2: !GetAtt VPC.Outputs.PublicSubnet2
+                PrivateSubnet1: !GetAtt VPC.Outputs.PrivateSubnet1
+                PrivateSubnet2: !GetAtt VPC.Outputs.PrivateSubnet2
+                TaskExecutionRole: !Ref TaskExecutionRole
+                DNSName: !GetAtt VPC.Outputs.DNSName
+                SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+                DesiredCount: !Ref DesiredCount
+                Priority: 3
+                DeployToCanaryMsg: !Ref DeployToCanaryMsg
+                DeployToProdMsg: !Ref DeployToProdMsg
+                DeployToDevMsg: !Ref DeployToDevMsg
+                DeployToStagingMsg: !Ref DeployToStagingMsg
+                MinCapacity: !Ref MinCapacity
+                MaxCapacity: !Ref MaxCapacity
+                Memory: !Ref Memory
+                Cpu: !Ref Cpu
+
+
+Outputs:
+    VpcId:
+        Value: !Ref VpcId
+    ClusterName:
+        Value: !Ref Cluster
+    ServiceUrl:
+        Description: URL of the load balancer for the sample service.
+        Value: !GetAtt VPC.Outputs.LoadBalancerListenerHTTP
